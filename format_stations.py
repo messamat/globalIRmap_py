@@ -23,8 +23,7 @@ if not arcpy.Exists(outgdb):
     arcpy.CreateFileGDB_management(os.path.split(outgdb)[0], os.path.split(outgdb)[1])
 GRDCp = os.path.join(outgdb, 'GRDCstations')
 GRDCpjoin = os.path.join(outgdb, 'GRDCstations_riverjoin')
-
-################################## Analysis ############################################################################
+riveratlas_csv = os.path.join(resdir, 'RiverATLAS_v10tab.csv')
 
 #Create points for GRDC stations
 stations_coords = {row[0]:[row[1], row[2]]
@@ -37,8 +36,10 @@ with arcpy.da.InsertCursor(GRDCp, ['GRDC_NO', 'SHAPE@XY']) as cursor:
     for k, v in stations_coords.items():
         cursor.insertRow([k, arcpy.Point(v[0], v[1])])
 
-#Check nearest
+#Join GRDC stations to nearest river reach in RiverAtlas
 arcpy.SpatialJoin_analysis(GRDCp, riveratlas, GRDCpjoin, join_operation='JOIN_ONE_TO_ONE', join_type="KEEP_COMMON",
                            match_option='CLOSEST_GEODESIC', search_radius=0.0005,
                            distance_field_name='station_river_distance')
 
+#Export attribute table of RiverATLAS with selected
+arcpy.CopyRows_management(in_rows = riveratlas, out_table=riveratlas_csv)
