@@ -11,10 +11,11 @@ import json
 from cookielib import CookieJar
 from urllib import urlencode
 import urllib2
+from bs4 import BeautifulSoup
+import urlparse
 import math
 import numpy as np
-from osgeo import gdal
-from osgeo import gdal_array
+from collections import defaultdict
 
 #pip install pyproj==1.9.6 owslib==0.18 - 0.19 dropped python 2.7
 from owslib.wcs import WebCoverageService  # OWSlib module to access WMS services from SDAT
@@ -26,13 +27,92 @@ resdir = os.path.join(rootdir, 'HydroATLAS' , 'results')
 glad_dir = os.path.join(datdir, 'GLAD')
 pathcheckcreate(glad_dir)
 
+# ------------------------------- Download EarthEnv-DEM90 data -------------------------------------------------------------
+ee_outdir = os.path.join(datdir, 'earthenv')
+pathcheckcreate(ee_outdir)
+
+# Parse HTML to get all available layers
+ee_https = "https://www.earthenv.org/DEM.html" #Doesn't work, return 403 with urlibb2
+
+ytileset = {'N{}'.format(x) for x in xrange(0, 85, 5)} | \
+           {'S{}'.format(x) for x in xrange(0, 60, 5)}
+xtileset = {'W{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)} | \
+           {'E{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)}
+
+for x in xtileset:
+    for y in ytileset:
+        tile = "http://mirrors.iplantcollaborative.org/earthenv_dem_data/EarthEnv-DEM90/" \
+               "EarthEnv-DEM90_{0}{1}.tar.gz".format(y, x)
+        outtile = os.path.join(ee_outdir, os.path.split(tile)[1])
+        try:
+            if not os.path.exists(os.path.splitext(outtile)[0]):
+                dlfile(url=tile, outpath=ee_outdir, ignore_downloadable = True, outfile=os.path.split(outtile)[1])
+                print('Deleting {}...'.format(outtile))
+                os.remove(outtile)
+        except:
+            traceback.print_exc()
+        del tile
+
+# ------------------------------- Download SoilGrids250 m data -------------------------------------------------------------
+#Create output directory
+sg_outdir = os.path.join(datdir, 'SOILGRIDS250')
+pathcheckcreate(sg_outdir)
+
+# Download metadata
+dlfile("https://files.isric.org/soilgrids/data/recent/META_GEOTIFF_1B.csv", sg_outdir)
+
+#Parse HTML to get all available layers
+sg_https = "https://files.isric.org/soilgrids/data/recent/"
+sg_r = urllib2.urlopen(sg_https)
+sg_soup = BeautifulSoup(sg_r, features="html.parser")
+
+sg_lyrdict = defaultdict(list)
+for link in sg_soup.findAll('a', attrs={'href': re.compile(".*[.]tif$")}):
+    sg_lyrdict[re.search("^[a-zA-Z1-9]+(?=_)", link.get('href')).group()].append(
+        urlparse.urljoin(sg_https, link.get('href')))
+
+#Download all layers of interest
+#for lyrk in sg_lyrdict.keys():
+lyrk = "SLGWRB"
+if lyrk not in ["TAXNWRB", "TAXOUSDA"]:
+    outdir = os.path.join(sg_outdir, lyrk)
+    pathcheckcreate(outdir)
+
+    for lyrurl in sg_lyrdict[lyrk]:
+        print(lyrurl)
+        #dlfile(url=lyrurl, outpath=outdir, outfile=os.path.split(lyrurl)[1], fieldnames=None)
+
+#------------------------------- Download MODIS 250 m land and water mask to enhance SoilGrids -------------------------
+# Create output directory
+mod44w_outdir = os.path.join(datdir, 'mod44w')
+pathcheckcreate(mod44w_outdir)
+
+# Download metadata
+dlfile(url='https://lpdaac.usgs.gov/documents/109/MOD44W_User_Guide_ATBD_V6.pdf', outpath=mod44w_outdir)
+
+# Parse HTML to get all available layers
+mod44w_https = "https://e4ftl01.cr.usgs.gov/MOLT/MOD44W.006/2015.01.01/"
+mod44w_r = urllib2.urlopen(mod44w_https)
+mod44w_soup = BeautifulSoup(mod44w_r, features="html.parser")
+
+# The user credentials that will be used to authenticate access to the data
+with open("configs.json") as json_data_file:  # https://martin-thoma.com/configuration-files-in-python/
+    authdat = json.load(json_data_file)
+
+# Download all layers of interest
+for lyrurl in [urlparse.urljoin(mod44w_https, link.get('href')) for link in
+               mod44w_soup.findAll('a', attrs={'href': re.compile("MOD44W.*[.]hdf([.]xml)*")})]:
+
+        dlfile(url=lyrurl, outpath=mod44w_outdir, outfile=os.path.split(lyrurl)[1], fieldnames=None,
+               loginprompter="https://urs.earthdata.nasa.gov",
+               username=authdat['earthdata']['username'], password=authdat['earthdata']['password'])
+
 #------------------------------- Download HYSOGS250 m data -------------------------------------------------------------
-HYSOGSdir = os.path.join(datdir, 'HYSOGS')
-pathcheckcreate(HYSOGSdir)
-HYSOGSresdir = os.path.join(resdir, 'HYSOGS')
-pathcheckcreate(HYSOGSresdir)
-HYSOGmosaic = os.path.join(HYSOGSresdir, 'HYSOGS_mosaic')
-HYSOGnodata = os.path.join(HYSOGSresdir, 'HYSOGS_nodata')
+hysogdir = os.path.join(datdir, 'hysog')
+pathcheckcreate(hysogdir)
+hysogresgdb = os.path.join(resdir, 'hysog.gdb')
+pathcheckcreate(hysogresgdb)
+hysogmosaic = os.path.join(hysogresgdb, 'hysog_mosaic')
 
 #DOI of dataset is https://doi.org/10.3334/ORNLDAAC/1566
 #This last number is the dataset ID to be used for search in WebMapService
@@ -42,16 +122,16 @@ print(str(len(sdatwcs.contents)) + ' layers found from ' + sdatwcs.identificatio
 hysog_wcsid = filter(lambda x: x.startswith('1566_'), sdatwcs.contents)[0]
 print(hysog_wcsid)
 
-HYSOGbblist = divbb(bbox=sdatwcs[hysog_wcsid].boundingBoxWGS84,
+hysogbblist = divbb(bbox=sdatwcs[hysog_wcsid].boundingBoxWGS84,
                     res=sdatwcs[hysog_wcsid].grid.offsetvectors[0][0],
                     divratio=10)
-HYSOGoutlist = ['{0}_{1}.tif'.format(os.path.join(HYSOGSdir, 'HYSOGS'), i)
-                for i in xrange(0, len(HYSOGbblist))]
-if not all([os.path.isfile(i) for i in HYSOGoutlist]):
+hysogoutlist = ['{0}_{1}.tif'.format(os.path.join(hysogdir, 'hysog'), i)
+                for i in xrange(0, len(hysogbblist))]
+if not all([os.path.isfile(i) for i in hysogoutlist]):
     x=0
-    for bb in HYSOGbblist:
+    for bb in hysogbblist:
         #print(bb)
-        outtile = HYSOGoutlist[x]
+        outtile = hysogoutlist[x]
         if not os.path.isfile(outtile):
             print(outtile)
             hysog_wc = sdatwcs.getCoverage(identifier=hysog_wcsid,
@@ -70,20 +150,19 @@ if not all([os.path.isfile(i) for i in HYSOGoutlist]):
         x+=1
 
 # #Only keep tiles with data - only works with numpy > 1.9.3 but breaks arcpy
-# for tilepath in HYSOGoutlist:
+# for tilepath in hysogoutlist:
 #     print(tilepath)
 #     tiledat = gdal_array.LoadFile(tilepath)
 #     if tiledat.max() == 0:
-#         HYSOGoutlist.remove(tilepath)
+#         hysogoutlist.remove(tilepath)
 
 #mosaic them
-arcpy.MosaicToNewRaster_management(HYSOGoutlist, output_location=HYSOGSresdir,
-                                   raster_dataset_name_with_extension= 'HYSOGS_mosaic',
+print('Mosaicking hysogs tiles...')
+arcpy.MosaicToNewRaster_management(hysogoutlist, output_location=hysogresgdb,
+                                   raster_dataset_name_with_extension= 'hysog_mosaic',
                                    pixel_type= '8_BIT_UNSIGNED',
                                    number_of_bands = 1,
                                    mosaic_colormap_mode = 'FIRST')
-
-Con()- Raster(os.path.join(HYSOGSresdir, 'HYSOGS_mosaic')
 
 
 # ----------------------------- Download GLAD data ----------------------------------------------------------------------
@@ -106,6 +185,16 @@ for tile in glad_cloudlist:
 
 
 
+
+
+
+
+
+
+
+########################################################################################################################
+########################################################################################################################
+
 #-----------------------------------------------------------------------------------------------------------------------
 #Extra stuff
 # The user credentials that will be used to authenticate access to the data
@@ -113,7 +202,7 @@ with open("configs.json") as json_data_file: #https://martin-thoma.com/configura
     authdat = json.load(json_data_file)
 
 # The url of the file we wish to retrieve
-urlHYSOG = "https://daac.ornl.gov/daacdata/global_soil/Global_Hydrologic_Soil_Group/data/HYSOGs250m.tif?_ga=2.3478517.499069434.1587733359-1920916281.1587510472"
+urlhysog = "https://daac.ornl.gov/daacdata/global_soil/Global_Hydrologic_Soil_Group/data/HYSOGs250m.tif?_ga=2.3478517.499069434.1587733359-1920916281.1587510472"
 
 # Create a password manager to deal with the 401 reponse that is returned from Earthdata Login
 password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
@@ -137,22 +226,22 @@ urllib2.install_opener(opener)
 # can be thrown here, including HTTPError and URLError. These should be
 # caught and handled.
 
-request = urllib2.Request(urlHYSOG)
+request = urllib2.Request(urlhysog)
 response = urllib2.urlopen(request)
 list(response.info())
 response.info()['content-type']
 
-outHYSOGS = os.path.join(datdir, 'HYSOGS', 'HYSOGS')
-pathcheckcreate(os.path.split(outHYSOGS)[0])
+outhysog = os.path.join(datdir, 'hysog', 'hysog')
+pathcheckcreate(os.path.split(outhysog)[0])
 
 if out is None:
     return response.read().decode('utf-8')
 else:
 import shutil
-shutil.copyfileobj(response, outHYSOGS)
+shutil.copyfileobj(response, outhysog)
 
 
-with open(outHYSOGS, "wb") as local_file:
+with open(outhysog, "wb") as local_file:
     local_file.write(response.read())
 # Unzip downloaded file
 try:
@@ -160,7 +249,7 @@ try:
 except:
     z = zipfile.ZipFile(io.BytesIO(response.content))
     if isinstance(z, zipfile.ZipFile):
-        z.extractall(os.path.split(outHYSOGS)[0])
+        z.extractall(os.path.split(outhysog)[0])
 
 # Print out the result (not a good idea with binary data!)
 

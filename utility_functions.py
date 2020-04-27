@@ -1,18 +1,27 @@
-import os
-import re
-import requests
-import pandas as pd
-import zipfile
+import csv
+import ftplib
 import gzip
 import io
-import csv
-import arcpy
 import itertools
+import os
+import re
+import sys
 import traceback
 import urlparse
-import sys
-import ftplib
+import zipfile
+import urllib2
+from cookielib import CookieJar
+import shutil
+
+import arcpy
+from arcpy.sa import *
 import numpy as np
+import pandas as pd
+import requests
+
+def compsr(lyr1, lyr2):
+    return(arcpy.Describe(lyr1).SpatialReference.exportToString() ==
+           arcpy.Describe(lyr2).SpatialReference.exportToString())
 
 def divbb(bbox, res, divratio):
     box_lc_x, box_lc_y, box_rc_x, box_rc_y = bbox
@@ -42,14 +51,12 @@ def divbb(bbox, res, divratio):
 
 def getwkspfiles(dir, repattern):
     arcpy.env.workspace = dir
-    filenames_list = (arcpy.ListDatasets() or []) + (
-            arcpy.ListTables() or [])  # Either LisDatsets or ListTables may return None so need to create empty list alternative
+    filenames_list = (arcpy.ListDatasets() or []) + (arcpy.ListTables() or [])  # Either LisDatsets or ListTables may return None so need to create empty list alternative
     if not repattern == None:
         filenames_list = [os.path.join(dir, filen)
                           for filen in filenames_list if re.search(repattern, filen)]
     return (filenames_list)
     arcpy.ClearEnvironment('workspace')
-
 
 def getfilelist(dir, repattern=None, gdbf=True, nongdbf=True):
     """Function to iteratively go through all subdirectories inside 'dir' path
@@ -59,7 +66,7 @@ def getfilelist(dir, repattern=None, gdbf=True, nongdbf=True):
         if arcpy.Describe(dir).dataType == 'Workspace':
             if gdbf == True:
                 print('{} is ArcGIS workspace...'.format(dir))
-                getwkspfiles(dir, repattern)
+                filenames_list = getwkspfiles(dir, repattern)
             else:
                 raise ValueError(
                     "A gdb workspace was given for dir but gdbf=False... either change dir or set gdbf to True")
@@ -92,7 +99,6 @@ def getfilelist(dir, repattern=None, gdbf=True, nongdbf=True):
         # By default any other errors will be caught here
         e = sys.exc_info()[1]
         print(e.args[0])
-
 
 def pathcheckcreate(path, verbose=True):
     """"Function that takes a path as input and:
@@ -131,7 +137,6 @@ def getfilelist(dir, repattern):
             for (dirpath, dirnames, filenames) in os.walk(dir)
             for file in filenames if re.search(repattern, file)]
 
-
 def mergedel(dir, repattern, outfile, delete=False, verbose=False):
     flist = getfilelist(dir, repattern)
     pd.concat([pd.read_csv(file, index_col=[0], parse_dates=[0])
@@ -147,18 +152,20 @@ def mergedel(dir, repattern, outfile, delete=False, verbose=False):
             if verbose == True:
                 print('Delete {}'.format(tab))
 
-
 def is_downloadable(url):
     """
     Does the url contain a downloadable resource
     """
-    h = requests.head(url, allow_redirects=True)
-    header = h.headers
-    content_type = header.get('content-type')
-    if 'html' in content_type.lower():
+    try:
+        h = requests.head(url, allow_redirects=True)
+        header = h.headers
+        content_type = header.get('content-type')
+        if 'html' in content_type.lower():
+            return False
+        return True
+    except Exception as e:
+        traceback.print_exc()
         return False
-    return True
-
 
 def get_filename_from_cd(url):
     """
@@ -172,7 +179,6 @@ def get_filename_from_cd(url):
     if len(fname) == 0:
         return None
     return fname[0]
-
 
 def unzip(infile):
     # Unzip folder
@@ -188,60 +194,118 @@ def unzip(infile):
     else:
         raise ValueError('Not a zip file')
 
-
-def dlfile(url, outpath, outfile=None, fieldnames=None):
+def dlfile(url, outpath, outfile=None, ignore_downloadable=False,
+           fieldnames=None,
+           loginprompter=None, username=None, password=None):
     """Function to download file from URL path and unzip it.
     URL (required): URL of file to download
     outpath (required): the full path including
-    outfile (optional): the output name without file extension, otherwise gets it from URL
+    outfile (optional): the output name without file extension, otherwise gets it from URL. If the file is heavy, this may take a while
     fieldnames (optional): fieldnames in output table if downloading plain text"""
 
     try:
-        if is_downloadable(url):  # check that url is not just html
+        if is_downloadable(url) or ignore_downloadable==True:  # check that url is not just html
             # Get output file name
             if outfile is None:
                 outfile = get_filename_from_cd(url)
                 if outfile is not None:
-                    out = os.path.join(outpath, outfile)
+                    out = os.path.join(outpath, re.sub("""('|")""",'', outfile))
                 else:
                     out = os.path.join(outpath, os.path.split(url)[1])
             else:
-                out = os.path.join(outpath, outfile + os.path.splitext(url)[1])
+                if os.path.splitext(url)[1]== os.path.splitext(outfile)[1]:
+                    out = os.path.join(outpath, outfile)
+                else:
+                    out = os.path.join(outpath, "{0}{1}".format(outfile + os.path.splitext(url)[1]))
             del outfile
 
             # http request
-            f = requests.get(url, allow_redirects=True)
-            print "downloading " + url
+            if username != None and password != None:
+                # Create a password manager to deal with the 401 reponse that is returned from Earthdata Login
+                password_manager = urllib2.HTTPPasswordMgrWithDefaultRealm()
+                password_manager.add_password(None, loginprompter, username, password)
+
+                # Create a cookie jar for storing cookies. This is used to store and return the session cookie given to use by
+                # the data server (otherwise it will just keep sending us back to Earthdata Login to authenticate).
+                # Ideally, we should use a file based cookie jar to preserve cookies between runs. This will make it much more efficient.
+                cookie_jar = CookieJar()
+
+                # Install all the handlers.
+                opener = urllib2.build_opener(
+                    urllib2.HTTPBasicAuthHandler(password_manager),
+                    # urllib2.HTTPHandler(debuglevel=1),    # Uncomment these two lines to see
+                    # urllib2.HTTPSHandler(debuglevel=1),   # details of the requests/responses
+                    urllib2.HTTPCookieProcessor(cookie_jar))
+                urllib2.install_opener(opener)
+
+                # Create and submit the request. There are a wide range of exceptions that
+                # can be thrown here, including HTTPError and URLError. These should be
+                # caught and handled.
+
+                request = urllib2.Request(url)
+                f = urllib2.urlopen(request)
+                print "downloading " + url
+            else:
+                f = requests.get(url, allow_redirects=True)
+                print "downloading " + url
 
             # Open local file for writing
             if not os.path.exists(out):
-                if 'csv' in f.headers.get('content-type').lower():  # If csv file
-                    df = pd.read_csv(io.StringIO(f.text))
-                    df.to_csv(out, index=False)
+                if 'content-type' in f.headers:
+                    if 'csv' in f.headers.get('content-type').lower():  # If csv file
+                        df = pd.read_csv(io.StringIO(f.text))
+                        df.to_csv(out, index=False)
 
-                elif f.headers.get('content-type').lower() == 'text/plain':  # If plain text
-                    dialect = csv.Sniffer().sniff(f.text)
-                    txtF = csv.DictReader(f.text.split('\n'),
-                                          delimiter=dialect.delimiter,
-                                          fieldnames=fieldnames)
-                    with open(out, "wb") as local_file:
-                        writer = csv.DictWriter(local_file, fieldnames=fieldnames)
-                        writer.writeheader()
-                        for row in txtF:
-                            writer.writerow(row)
+                    elif 'tiff' in f.headers.get('content-type').lower():
+                        with open(out, "wb") as local_file:
+                            local_file.write(f.content)
 
-                elif f.headers.get('content-type').lower() == 'application/x-gzip':
+                    elif 'x-hdf' in f.headers.get('content-type').lower():
+                        #CHUNK = 16 * 1024
+                        with open(out, 'wb') as local_file:
+                            shutil.copyfileobj(f, local_file)#, CHUNK)
+
+                    elif f.headers.get('content-type').lower() == 'text/plain':  # If plain text
+                        dialect = csv.Sniffer().sniff(f.text)
+                        txtF = csv.DictReader(f.text.split('\n'),
+                                              delimiter=dialect.delimiter,
+                                              fieldnames=fieldnames)
+                        with open(out, "wb") as local_file:
+                            writer = csv.DictWriter(local_file, fieldnames=fieldnames)
+                            writer.writeheader()
+                            for row in txtF:
+                                writer.writerow(row)
+
+                    elif f.headers.get('content-type').lower() == 'application/x-gzip':
+                        outunzip = os.path.splitext(out)[0]
+
+                        # Very inelegant. But trying to download and decompress in memory always messes up files
+                        response = requests.get(url, stream=True)
+                        if response.status_code == 200:
+                            with open(out, 'wb') as f:
+                                f.write(response.raw.read())
+                        with gzip.GzipFile(out, 'rb') as input:
+                            print('Unzipping {0} to {1}'.format(out, outunzip))
+                            s = input.read()
+                            with open(outunzip, 'wb') as output:
+                                output.write(s)
+
+                elif os.path.splitext(url)[1] == '.gz':
                     outunzip = os.path.splitext(out)[0]
+                    if not os.path.exists(outunzip):
+                        # Very inelegant. But trying to download and decompress in memory always messes up files
+                        response = requests.get(url, stream=True)
+                        if response.status_code == 200:
+                            with open(out, 'wb') as f:
+                                f.write(response.raw.read())
+                        with gzip.GzipFile(out, 'rb') as input:
+                            print('Unzipping {0} to {1}'.format(out, outunzip))
+                            s = input.read()
+                            with open(outunzip, 'wb') as output:
+                                output.write(s)
+                    else:
+                        print('{} already exists...'.format(outunzip))
 
-                    # Very inelegant. But trying to download and decompress in memory always messes up files
-                    response = requests.get(url, stream=True)
-                    if response.status_code == 200:
-                        with open(out, 'wb') as f:
-                            f.write(response.raw.read())
-                    with gzip.GzipFile(out, 'rb') as input:
-                        s = input.read()
-                        with open(outunzip, 'wb') as output:
-                            output.write(s)
 
                 else:  # Otherwise, just try reading
                     try:  # Try writing to local file
@@ -254,11 +318,12 @@ def dlfile(url, outpath, outfile=None, fieldnames=None):
                             z = zipfile.ZipFile(io.BytesIO(f.content))
                             if isinstance(z, zipfile.ZipFile):
                                 z.extractall(os.path.split(out)[0])
-                    except Exception:  # If fails and is zip, directly download zip in memory
-                        print('Try downloading zip in memory...')
+                    except Exception:
                         os.remove(out)
-                        if os.path.splitext(url)[1] == '.zip':
+                        if os.path.splitext(url)[1] == '.zip':  # If fails and is zip, directly download zip in memory
+                            print('Try downloading zip in memory...')
                             z = zipfile.ZipFile(io.BytesIO(f.content))
+
             else:
                 print('{} already exists...'.format(out))
         else:
@@ -443,3 +508,105 @@ def downloadNARR(folder, variable, years, outdir=None):
             ftp.quit()
         if len(failedlist) > 0:
             print('{} failed to download...'.format(','.join(failedlist)))
+
+
+# Function that takes an unprojected raster in WGS84 as an input and outputs a grid of the same extent and resolution
+# with the pixel area for each pixel
+def WGS84_pixelarea(in_ras, out_wd):
+    # Careful, only works for square grids and pixels
+    # Require math, arcpy
+    in_ras = Raster(in_ras)
+    arcpy.env.extent = in_ras
+    arcpy.env.cellSize = in_ras
+    ###############################################################
+    # Generate latitude grid (from https://community.esri.com/thread/43907)
+    # Calculate $$NROWS and $$NCOLS from current environment
+    cellSize = float(arcpy.env.cellSize)
+    nrows = int((arcpy.env.extent.YMax - arcpy.env.extent.YMin) / cellSize)
+    ncols = int((arcpy.env.extent.XMax - arcpy.env.extent.XMin) / cellSize)
+    # Bill Huber's method for $$XMAP and $$YMAP: "1" flows "right", "64" (63+1) flows "up"
+    print("Create constant raster")
+    tmpg = CreateConstantRaster(1)
+    # xmap = (arcpy.sa.FlowAccumulation(tmpg) + 0.5) * cellSize + env.extent.XMin
+    print("Compute flow accumulation")
+    ymap = (arcpy.sa.FlowAccumulation(tmpg + 63) + 0.5) * cellSize + arcpy.env.extent.YMin
+    ###############################################################
+    # Compute pixel area (from http://www.jennessent.com/downloads/Graphics_Shapes_Online.pdf p61-62)
+    WGS84_radius = 6371000.79000915
+    rad = arcpy.math.pi / 180
+    print("Compute pixel area")
+    pixelheight = WGS84_radius * 2 * ATan2(SquareRoot(((arcpy.math.sin(arcpy.math.radians(cellSize / 2)) ** 2) + (
+                arcpy.math.sin(arcpy.math.radians(0)) ** 2) * Cos(rad * (ymap + cellSize / 2)) * Cos(rad * (ymap - cellSize / 2)))),
+                                           SquareRoot(1 - ((arcpy.math.sin(arcpy.math.radians(cellSize / 2)) ** 2) + (
+                                                       arcpy.math.sin(arcpy.math.radians(0)) ** 2) * Cos(
+                                               rad * (ymap + cellSize / 2)) * Cos(rad * (ymap - cellSize / 2)))))
+    pixelwidth = WGS84_radius * 2 * ATan2(SquareRoot(((arcpy.math.sin(arcpy.math.radians(0)) ** 2) + (
+                arcpy.math.sin(arcpy.math.radians(cellSize / 2)) ** 2) * Cos(rad * (ymap + cellSize / 2)) * Cos(
+        rad * (ymap - cellSize / 2)))),
+                                          SquareRoot(1 - ((arcpy.math.sin(arcpy.math.radians(0)) ** 2) + (
+                                                      arcpy.math.sin(arcpy.math.radians(cellSize / 2)) ** 2) * Cos(
+                                              rad * (ymap + cellSize / 2)) * Cos(rad * (ymap - cellSize / 2)))))
+    pixelarea = pixelheight * pixelwidth
+    print("Save pixel area raster")
+    pixelarea.save(os.path.join(out_wd, 'pixelarea.tif'))
+    arcpy.ClearEnvironment('extent')
+    arcpy.ClearEnvironment('cellSize')
+    arcpy.Delete_management(pixelheight)
+    arcpy.Delete_management(pixelwidth)
+    arcpy.Delete_management(ymap)
+
+# Custom version of ArcGIS Tabulate Area for an unprojected raster
+def ras_catcount(in_zone_data, in_class_data, output_wd, out_table, pixel_area, scratch_wd):  # class_data must be in integer format
+    if pixel_area is None:
+        if not arcpy.Exists(scratch_wd + '\\pixelarea.tif'):
+            print('Computing pixel area')
+            WGS84_pixelarea(in_zone_data, scratch_wd)
+            pixel_area = scratch_wd + '\\pixelarea.tif'
+
+    arcpy.MakeTableView_management(in_class_data, 'zonetab')
+    # Iterate over every category in class data
+    print('Creating scratch GDB')
+    scratchgdb = scratch_wd + '\\scratch.gdb'
+    arcpy.CreateFileGDB_management(scratch_wd, out_name='scratch.gdb')
+    try:
+        with arcpy.da.SearchCursor('zonetab', ['Value']) as cursor:
+            row = next(cursor)
+            print(row[0])
+            classbool = Con(Raster(in_class_data) == row[0], pixel_area,
+                            0)  # Create a raster of pixel area in cells with that category
+            print("Boolean done!")
+            scratchtable = os.path.join(scratchgdb, 'catcount{}'.format(row[0]))
+            ZonalStatisticsAsTable(in_zone_data, 'Value', classbool, scratchtable, "DATA", "SUM")
+            print("Zonal stats done!")
+            arcpy.AlterField_management(scratchtable, field="SUM", new_field_name='SUM_{}'.format(row[0]))
+            tabjoin = arcpy.da.TableToNumPyArray(scratchtable, ('Value', 'SUM_{}'.format(row[0])))
+            print("Create new numpy array done!")
+            for row in cursor:
+                print(row[0])
+                classbool = Con(Raster(in_class_data) == row[0], pixel_area, 0)
+                print("Boolean done!")
+                scratchtable = os.path.join(scratchgdb, 'catcount{}'.format(row[0]))
+                ZonalStatisticsAsTable(in_zone_data, 'Value', classbool, scratchtable, "DATA", "SUM")
+                print("Zonal stats done!")
+                arcpy.AlterField_management(scratchtable, field="SUM", new_field_name='SUM_{}'.format(row[0]))
+                print("Alter field done!")
+                array = arcpy.da.TableToNumPyArray(scratchtable, ('Value', 'SUM_{}'.format(row[0])))
+                print("Numpy array done!")
+                try:
+                    tabjoin = np.lib.recfunctions.join_by('Value', tabjoin, array, jointype='inner', usemask=False)
+                    print("Join done!")
+                except:  # Can run into MemoryError if array gets too big
+                    print("Join didn't work, might have run out of memory, output array and write another one")
+                    arcpy.da.NumPyArrayToTable(tabjoin, os.path.join(output_wd, out_table + str(row[0])))
+                    print("Array to table done!")
+                    del tabjoin
+                    tabjoin = arcpy.da.TableToNumPyArray(scratchtable, ('Value', 'SUM_{}'.format(row[0])))
+                    print("Create new numpy array done!")
+            arcpy.da.NumPyArrayToTable(tabjoin, os.path.join(output_wd, out_table + str(row[0])))
+            print("Array to table done!")
+    except:
+        del cursor
+        print("Delete row and cursor done!")
+        arcpy.Delete_management(scratchgdb)
+        del tabjoin
+        print("Delete gdb and array done!")
