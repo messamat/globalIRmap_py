@@ -19,6 +19,14 @@ import numpy as np
 import pandas as pd
 import requests
 
+
+# Divide and aggregate each band in a raster by cell size ratio
+def catdivagg_list(inras, vals, exclude_list, aggratio):
+    return (
+        [Aggregate((Con(Raster(inras) == v, 1)),
+                   aggratio, aggregation_type='SUM', extent_handling='EXPAND', ignore_nodata='DATA')
+         for v in vals if v not in exclude_list])
+
 def compsr(lyr1, lyr2):
     return(arcpy.Describe(lyr1).SpatialReference.exportToString() ==
            arcpy.Describe(lyr2).SpatialReference.exportToString())
@@ -130,13 +138,6 @@ def pathcheckcreate(path, verbose=True):
             path = os.path.join(path, dir)
             os.mkdir(path)
 
-# Function to download and unzip miscellaneous types of files
-# Partly inspired from https://www.codementor.io/aviaryan/downloading-files-from-urls-in-python-77q3bs0un
-def getfilelist(dir, repattern):
-    return [os.path.join(dirpath, file)
-            for (dirpath, dirnames, filenames) in os.walk(dir)
-            for file in filenames if re.search(repattern, file)]
-
 def mergedel(dir, repattern, outfile, delete=False, verbose=False):
     flist = getfilelist(dir, repattern)
     pd.concat([pd.read_csv(file, index_col=[0], parse_dates=[0])
@@ -213,10 +214,13 @@ def dlfile(url, outpath, outfile=None, ignore_downloadable=False,
                 else:
                     out = os.path.join(outpath, os.path.split(url)[1])
             else:
-                if os.path.splitext(url)[1]== os.path.splitext(outfile)[1]:
-                    out = os.path.join(outpath, outfile)
+                if len(os.path.splitext(url)[1]) > 0:
+                    if os.path.splitext(url)[1]== os.path.splitext(outfile)[1]:
+                        out = os.path.join(outpath, outfile)
+                    else:
+                        out = os.path.join(outpath, "{0}{1}".format(outfile + os.path.splitext(url)[1]))
                 else:
-                    out = os.path.join(outpath, "{0}{1}".format(outfile + os.path.splitext(url)[1]))
+                    out = os.path.join(outpath, outfile)
             del outfile
 
             # http request

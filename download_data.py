@@ -16,6 +16,7 @@ import urlparse
 import math
 import numpy as np
 from collections import defaultdict
+import tarfile
 
 #pip install pyproj==1.9.6 owslib==0.18 - 0.19 dropped python 2.7
 from owslib.wcs import WebCoverageService  # OWSlib module to access WMS services from SDAT
@@ -34,10 +35,13 @@ pathcheckcreate(ee_outdir)
 # Parse HTML to get all available layers
 ee_https = "https://www.earthenv.org/DEM.html" #Doesn't work, return 403 with urlibb2
 
-ytileset = {'N{}'.format(x) for x in xrange(0, 85, 5)} | \
-           {'S{}'.format(x) for x in xrange(0, 60, 5)}
+# xrange(0, 85, 5) #xrange(0, 60, 5)
+ytileset = {'N{}'.format(str(x).zfill(2)) for x in xrange(0, 10, 5)} | \
+           {'S{}'.format(str(x).zfill(2)) for x in xrange(0, 10, 5)}
 xtileset = {'W{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)} | \
            {'E{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)}
+
+#EarthEnv_DEM90_N30E065_250
 
 for x in xtileset:
     for y in ytileset:
@@ -45,15 +49,32 @@ for x in xtileset:
                "EarthEnv-DEM90_{0}{1}.tar.gz".format(y, x)
         outtile = os.path.join(ee_outdir, os.path.split(tile)[1])
         try:
-            if not os.path.exists(os.path.splitext(outtile)[0]):
+            if not (os.path.exists(os.path.splitext(outtile)[0]) or \
+                    os.path.exists("{}.bil".format(os.path.splitext(os.path.splitext(outtile)[0])[0]))):
                 dlfile(url=tile, outpath=ee_outdir, ignore_downloadable = True, outfile=os.path.split(outtile)[1])
                 print('Deleting {}...'.format(outtile))
                 os.remove(outtile)
+            else:
+                print('{} was already processed...'.format(outtile))
         except:
             traceback.print_exc()
         del tile
 
+ee_tarlist = getfilelist(ee_outdir, '.*[.]tar$', gdbf=False, nongdbf=True)
+for f in ee_tarlist:
+    print(f)
+    if not os.path.exists('{}.bil'.format(os.path.splitext(f)[0])):
+        with tarfile.open(f) as ftar:
+            ftar.extractall(ee_outdir)  # specify which folder to extract to
+
+#-------------------------------- Download GlobeLand30 -----------------------------------------------------------------
+
+
+
+
 # ------------------------------- Download SoilGrids250 m data -------------------------------------------------------------
+#How to make the soil mask? https://github.com/ISRICWorldSoil/SoilGrids250m/blob/1a04d4214c0efabfe15abd621a6c299c173e402c/grids/GlobCover30/soilmask_250m.R
+
 #Create output directory
 sg_outdir = os.path.join(datdir, 'SOILGRIDS250')
 pathcheckcreate(sg_outdir)
@@ -106,6 +127,26 @@ for lyrurl in [urlparse.urljoin(mod44w_https, link.get('href')) for link in
         dlfile(url=lyrurl, outpath=mod44w_outdir, outfile=os.path.split(lyrurl)[1], fieldnames=None,
                loginprompter="https://urs.earthdata.nasa.gov",
                username=authdat['earthdata']['username'], password=authdat['earthdata']['password'])
+
+#------------------------------- Download GLIMS ------------------------------------------------------------------------
+# Create output directory
+glims_outdir = os.path.join(datdir, 'glims')
+pathcheckcreate(glims_outdir)
+
+outglims = os.path.join(glims_outdir, 'glims.zip')
+f= requests.get("http://www.glims.org/download/latest", allow_redirects=True) #no extension and content-type is plain text, tough to parse
+try:  # Try writing to local file
+    with open(outglims, "wb") as local_file:
+        local_file.write(f.raw.read())
+    # Unzip downloaded file
+    try:
+        unzip(outglims + '.zip')
+    except:
+        z = zipfile.ZipFile(io.BytesIO(f.content))
+        if isinstance(z, zipfile.ZipFile):
+            z.extractall(os.path.split(outglims)[0])
+except:
+    traceback.print_exc()
 
 #------------------------------- Download HYSOGS250 m data -------------------------------------------------------------
 hysogdir = os.path.join(datdir, 'hysog')
