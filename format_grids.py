@@ -19,6 +19,9 @@ scratchgdb = os.path.join(scratchdir, 'scratch.gdb')
 pathcheckcreate(scratchgdb)
 arcpy.env.scratchWorkspace = scratchgdb
 
+#HydroSHEDS dirs
+hydrodir = os.path.join(datdir, 'HydroSHEDS')
+
 # MODIS dirs
 mod44w_outdir = os.path.join(datdir, 'mod44w')
 mod44w_resgdb = os.path.join(resdir, 'mod44w.gdb')
@@ -39,6 +42,7 @@ pathcheckcreate(hydromaskdir)
 if not arcpy.Exists(hydromaskgdb):
     arcpy.CreateFileGDB_management(os.path.split(hydromaskgdb)[0], os.path.split(hydromaskgdb)[1])
 
+#------------- Format direction rasters into 1-NoData masks ------------------------------------------------------------
 hydrodir_list = {}
 for (dirpath, dirnames, filenames) in \
         arcpy.da.Walk(os.path.join(datdir, 'HydroSHEDS'), topdown=True, datatype="RasterDataset", type="GRID"):
@@ -81,6 +85,15 @@ for cont in hydrodir_list.keys():
             arcpy.ResetEnvironments()
 
 hydrotemplate = hydromask_dict[hydromask_dict.keys()[0]]  # Grab HydroSHEDS layer for one continent as template
+
+# ------------- Format northern basins into 1-NoData masks -----------------------------------------------------------
+baslist = getfilelist(hydrodir, 'hybas_.*[.]shp$', gdbf=False, nongdbf=True)
+hydrobas_dict = {cont: getfilelist(hydrodir, 'hybas_{}.*[.]shp$'.format(cont), gdbf=False, nongdbf=True)
+                 for cont in {re.search('(?<=hybas_)[a-z]{2}', os.path.split(f)[1]).group() for f in baslist}}
+
+#Rasterize basins with
+
+
 
 #----------------------------------------- Pre-Format MODIS 250m water mask ------------------------------------------------
 for tile in getfilelist(mod44w_outdir, '.*[.]hdf$'):
@@ -143,8 +156,8 @@ print('Aggregating DEM by cell size ratio of 2.5 would lead to a difference in r
     11100000*(arcpy.Describe(mod44w_mosaic).meanCellWidth-round(cellsize_ratio, 1)*arcpy.Describe(ee_tilelist[0]).meanCellWidth)
 ))
 #Make sure that the cell size ratio is a multiple of the number of rows and columns in DEM tiles to not have edge effects
-float(arcpy.Describe(ee_tilelist[0]).height) / 2.5
-float(arcpy.Describe(ee_tilelist[0]).width) / 2.5
+float(arcpy.Describe(ee_tilelist[0]).height) / 2
+float(arcpy.Describe(ee_tilelist[0]).width) / 2
 
 delete_seatiles = False
 for tile in ee_tilelist:
@@ -170,7 +183,7 @@ for tile in ee_tilelist:
                 pass
 
     outtile = re.sub('[-]', '_',
-                     os.path.join(ee_resgdb, '{}_250'.format(os.path.splitext(os.path.split(tile)[1])[0])))
+                     os.path.join(ee_resgdb, '{}_180'.format(os.path.splitext(os.path.split(tile)[1])[0])))
     if not arcpy.Exists(outtile):
         print('Aggregating to {}...'.format(outtile))
         Aggregate(tile, cell_factor=round(cellsize_ratio),
@@ -179,11 +192,11 @@ for tile in ee_tilelist:
         print('Same extent? {}'.format(arcpy.Describe(tile).extent.JSON == arcpy.Describe(outtile).extent.JSON))
 
 #Mosaic and aggregate DEM tiles based on HydroSHEDS continent tiles at
-ee_tilelist250 = getfilelist(ee_resgdb, 'EarthEnv_DEM90_[NS][0-9]{2}[WE][0-9]{3}_250$', gdbf=True, nongdbf=False)
+ee_tilelist180 = getfilelist(ee_resgdb, 'EarthEnv_DEM90_[NS][0-9]{2}[WE][0-9]{3}_250$', gdbf=True, nongdbf=False)
 ee_mosaic = os.path.join(ee_resgdb, 'ee_mosaic')
 ee_mosaic250 = os.path.join(ee_resgdb, 'ee_mosaic250')
 
-arcpy.MosaicToNewRaster_management(input_rasters=ee_tilelist250,
+arcpy.MosaicToNewRaster_management(input_rasters=ee_tilelist180,
                                    output_location=os.path.split(ee_mosaic)[0],
                                    raster_dataset_name_with_extension=os.path.split(ee_mosaic)[1],
                                    pixel_type='16_BIT_SIGNED',
@@ -195,6 +208,10 @@ arcpy.env.snapRaster = mod44w_mosaic
 arcpy.Resample_management(ee_mosaic, ee_mosaic250,
                           cell_size=arcpy.Describe(mod44w_mosaic).meanCellWidth,
                           resampling_type='Majority')
+
+#With focal statistics, check whether pixels are entirely surrounded by elevations > 0 #################################
+#3x3 window
+
 
 # ----------------------------------------- Identify sea and inland water pixels in MODIS ------------------------------
 #Extend QA modis ocean mask to all contiguous areas with 0 elevation in majority-smoothed 3x3 EarthEnv DEM (to deal with ASTER noise up North)

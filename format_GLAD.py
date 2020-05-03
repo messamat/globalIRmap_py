@@ -40,14 +40,26 @@ pathcheckcreate(gladresgdb)
 #11: Probable water
 #12: Sparse data? or land. Exclude
 
+rawtilelist = getfilelist(glad_dir, 'class99_18.*[.]tif$')
 
-# Get unique categorical values
-rawtilelist = getfilelist(glad_dir, 'class99_18.*[.]tif')
+#Check aggregation ratio
+cellsize_ratio = arcpy.Describe(hydrotemplate).meanCellWidth / arcpy.Describe(rawtilelist[0]).meanCellWidth
+print('Aggregating DEM by cell size ratio of {0} would lead to a difference in resolution of {1} mm'.format(
+    math.floor(cellsize_ratio),
+    11100000 * (arcpy.Describe(hydrotemplate).meanCellWidth - math.floor(cellsize_ratio) * arcpy.Describe(
+        rawtilelist[0]).meanCellWidth)
+))
+# Make sure that the cell size ratio is a multiple of the number of rows and columns in DEM tiles to not have edge effects
+float(arcpy.Describe(rawtilelist[0]).height) / math.floor(cellsize_ratio)
+float(arcpy.Describe(rawtilelist[0]).width) / math.floor(cellsize_ratio)
+
 hysogagg_dict = {}
 for tile in rawtilelist:
+    print(tile)
     outaggk = re.sub('(^.*class99_18_)|([.]tif)', '', tile)
-    hysogagg_dict[outaggk] = os.path.join(gladresgdb, '{0}_agg'.format(os.path.splitext(tile)[0]))
+    hysogagg_dict[outaggk] = os.path.join(gladresgdb, '{0}_agg'.format(os.path.splitext(os.path.split(tile)[1])[0]))
 
+    # Get unique categorical values
     if not arcpy.Exists(hysogagg_dict[outaggk]):
         if not Raster(tile).hasRAT and arcpy.Describe(tile).bandCount == 1:  # Build attribute table if doesn't exist
             try:
@@ -59,14 +71,36 @@ for tile in rawtilelist:
 
         gladvals = {row[0] for row in arcpy.da.SearchCursor(tile, 'Value')}
 
-        # Divide and aggregate each band
-        if compsr(tile, hydrotemplate):  # Make sure that share spatial reference with HydroSHEDS
-            # Check cellsize ratio
-            cellsize_ratio = arcpy.Describe(hydrotemplate).meanCellWidth / arcpy.Describe(tile).Children[
-                0].meanCellWidth
-            print('Divide {0} into {1} bands and aggregate by rounded value of {2}'.format(
-                hysogmosaic, len(hysogvals) - 1, cellsize_ratio))
-            arcpy.CompositeBands_management(in_rasters=catdivagg_list(inras=hysogmosaic, vals=hysogvals,
-                                                                      exclude_list=[0], aggratio=math.floor(cellsize_ratio)),
-                                            out_raster=hysogagg)
+        if len(gladvals) == 1:  # If only one value across entire tile
+            if list(gladvals)[0] == 0:  # And that value is NoData
+                print('Tile only has NoData values, deleting...')
+                arcpy.Delete_management(tile)  # Delete tile
+
+        else:
+            # Divide and aggregate each band
+            if compsr(tile, hydrotemplate):  # Make sure that share spatial reference with HydroSHEDS
+                print('Divide into {1} bands and aggregate by rounded value of {2}'.format(
+                    tile, len(gladvals), math.floor(cellsize_ratio)))
+                arcpy.CompositeBands_management(in_rasters=catdivagg_list(inras=tile,
+                                                                          vals=gladvals,
+                                                                          exclude_list=[0, 12],
+                                                                          aggratio=math.floor(cellsize_ratio)),
+                                                out_raster=hysogagg_dict[outaggk])
+
+#Differentiate sea water from inland water
+
+
+
+#Mosaick tiles
+
+
+#Resample to snap
+hysog_500 = {}
+for cont in hydrodir_list:
+    hysog_500[cont] = os.path.join(hysogresgdb, 'hysogs_{}_500m'.format(cont))
+    if not arcpy.Exists(hysog_500):
+        print(hysog_500[cont])
+        # Resample with nearest cell assignment
+        arcpy.env.extent = arcpy.env.snapRaster = arcpy.env.cellSize = arcpy.env.mask = hydromask_dict[cont]
+        arcpy.Resample_management(hysogagg, hysog_500[cont], cell_size=arcpy.env.cellSize, resampling_type='NEAREST')
 

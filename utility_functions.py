@@ -294,6 +294,17 @@ def dlfile(url, outpath, outfile=None, ignore_downloadable=False,
                             with open(outunzip, 'wb') as output:
                                 output.write(s)
 
+                    elif f.headers.get('content-type').lower() == 'application/zip':
+                        with open(out, "wb") as local_file:
+                            local_file.write(f.read())
+                        # Unzip downloaded file
+                        try:
+                            unzip(out)
+                        except:
+                            z = zipfile.ZipFile(io.BytesIO(f.content))
+                            if isinstance(z, zipfile.ZipFile):
+                                z.extractall(os.path.split(out)[0])
+
                 elif os.path.splitext(url)[1] == '.gz':
                     outunzip = os.path.splitext(out)[0]
                     if not os.path.exists(outunzip):
@@ -327,6 +338,11 @@ def dlfile(url, outpath, outfile=None, ignore_downloadable=False,
                         if os.path.splitext(url)[1] == '.zip':  # If fails and is zip, directly download zip in memory
                             print('Try downloading zip in memory...')
                             z = zipfile.ZipFile(io.BytesIO(f.content))
+
+                if not os.path.exists(out):
+                    raise Warning('No error was generated but {} was not downloaded. '
+                                  'Check that file type is included '
+                                  'in function options'.format(out))
 
             else:
                 print('{} already exists...'.format(out))

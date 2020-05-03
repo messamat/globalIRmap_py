@@ -17,6 +17,7 @@ import math
 import numpy as np
 from collections import defaultdict
 import tarfile
+from functools import reduce
 
 #pip install pyproj==1.9.6 owslib==0.18 - 0.19 dropped python 2.7
 from owslib.wcs import WebCoverageService  # OWSlib module to access WMS services from SDAT
@@ -36,12 +37,10 @@ pathcheckcreate(ee_outdir)
 ee_https = "https://www.earthenv.org/DEM.html" #Doesn't work, return 403 with urlibb2
 
 # xrange(0, 85, 5) #xrange(0, 60, 5)
-ytileset = {'N{}'.format(str(x).zfill(2)) for x in xrange(0, 10, 5)} | \
-           {'S{}'.format(str(x).zfill(2)) for x in xrange(0, 10, 5)}
+ytileset = {'N{}'.format(str(x).zfill(2)) for x in xrange(0, 90, 5)} | \
+           {'S{}'.format(str(x).zfill(2)) for x in xrange(0, 60, 5)}
 xtileset = {'W{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)} | \
            {'E{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)}
-
-#EarthEnv_DEM90_N30E065_250
 
 for x in xtileset:
     for y in ytileset:
@@ -69,8 +68,10 @@ for f in ee_tarlist:
 
 #-------------------------------- Download GlobeLand30 -----------------------------------------------------------------
 
-
-
+#"https://web.archive.org/web/20170710051151/http://globallandcover.com:80/user/ReturnPassword.aspx" Try and retrieve password?
+#Try WMS service e.g. https://gis.stackexchange.com/questions/283900/getting-wms-server-from-globeland30-landcover-interactive-map
+#http://218.244.250.80:8080/erdas-apollo/coverage/CGLC?LAYERS=cglc30_2010_0&TRANSPARENT=TRUE&FORMAT=image%2Fpng&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&STYLES=&SRS=EPSG%3A900913&BBOX=-176110.91314453,6124746.201582,-156543.03390625,6144314.0808203&WIDTH=256&HEIGHT=256
+#http://218.244.250.80:8080/erdas-apollo/coverage/CGLC?service=wms&request=getCapabilities
 
 # ------------------------------- Download SoilGrids250 m data -------------------------------------------------------------
 #How to make the soil mask? https://github.com/ISRICWorldSoil/SoilGrids250m/blob/1a04d4214c0efabfe15abd621a6c299c173e402c/grids/GlobCover30/soilmask_250m.R
@@ -221,6 +222,63 @@ for tile in glad_cloudlist:
         gsutil_cp_cmd = "gsutil cp {0} {1}".format(tile, glad_dir)
         subprocess.check_output(gsutil_cp_cmd)
         os.rename(os.path.join(glad_dir, glad_dtype), out_tilen)
+
+# ----------------------------- Download ALOS DEM data ----------------------------------------------------------------------
+#Main page https://www.eorc.jaxa.jp/ALOS/en/aw3d30/
+alos_outdir = os.path.join(datdir, 'ALOS')
+pathcheckcreate(alos_outdir)
+
+# Import user credentials that will be used to authenticate access to the data
+with open("configs.json") as json_data_file:  # https://martin-thoma.com/configuration-files-in-python/
+    authdat = json.load(json_data_file)
+
+#Source Javascript to get data on tile click: https://www.eorc.jaxa.jp/ALOS/en/aw3d30/data/html_v2003/js/dsm_dl_select_v2003.js?ver=20200330
+alosurl = "https://www.eorc.jaxa.jp/ALOS/en/aw3d30/data/html_v2003/dl/download_v2003.htm?N075E010_N079E011"
+def parse_alosurl(alosurl):
+    urlsub = alosurl[alosurl.index('?') + 1:]
+    downurl = reduce(urlparse.urljoin,
+                     ['https://www.eorc.jaxa.jp/ALOS/aw3d30/data/release_v2003/',
+                      '{}/'.format(urlsub[0:8]),
+                      '{}.zip'.format(urlsub[9:9 + 8])])
+
+#Generate server-based list of urls
+ytileset1 = {'N{}'.format(str(x).zfill(3)) for x in xrange(0, 95, 5)} | \
+            {'S{}'.format(str(x).zfill(3)) for x in xrange(0, 60, 5)}
+xtileset1 = {'W{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)} | \
+            {'E{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)}
+
+for x1 in xtileset1:
+    for y1 in ytileset1:
+        ytileset2 = {'{0}{1}'.format(y1[0], str(i).zfill(3)) for i in xrange(int(y1[1:]), int(y1[1:])+5)}
+        xtileset2 = {'{0}{1}'.format(x1[0], str(i).zfill(3)) for i in xrange(int(x1[1:]), int(x1[1:]) + 5)}
+        for x2 in xtileset2:
+            for y2 in ytileset2:
+                alos_tileurl = reduce(urlparse.urljoin,
+                                      ['https://www.eorc.jaxa.jp/ALOS/aw3d30/data/release_v2003/',
+                                       '{0}{1}/'.format(y1, x1),
+                                       '{0}{1}.zip'.format(y2, x2)])
+                alos_outtile = os.path.join(alos_outdir, '{0}{1}.zip'.format(y2, x2))
+                try:
+                    if not os.path.exists(alos_outtile):
+                        dlfile(url=alos_tileurl, outpath=alos_outdir, outfile=os.path.split(alos_outtile)[1],
+                               fieldnames=None,
+                               ignore_downloadable=False,
+                               loginprompter="https://www.eorc.jaxa.jp",
+                               username=authdat['alos']['username'], password=authdat['alos']['password'])
+                    else:
+                        print('{} was already processed...'.format(alos_outtile))
+                except:
+                    traceback.print_exc()
+
+
+
+
+
+
+
+
+
+
 
 
 
