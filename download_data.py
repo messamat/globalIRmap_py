@@ -297,8 +297,7 @@ for x1 in xtileset1:
 #-----------------------------------------------------------------------------------------------------------------------
 #Extra stuff
 # The user credentials that will be used to authenticate access to the data
-with open("configs.json") as json_data_file: #https://martin-thoma.com/configuration-files-in-python/
-    authdat = json.load(json_data_file)
+
 
 # The url of the file we wish to retrieve
 urlhysog = "https://daac.ornl.gov/daacdata/global_soil/Global_Hydrologic_Soil_Group/data/HYSOGs250m.tif?_ga=2.3478517.499069434.1587733359-1920916281.1587510472"
