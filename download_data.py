@@ -249,8 +249,16 @@ xtileset1 = {'W{}'.format(str(x).zfill(3)) for x in xrange(0, 185, 5)} | \
 
 for x1 in xtileset1:
     for y1 in ytileset1:
-        ytileset2 = {'{0}{1}'.format(y1[0], str(i).zfill(3)) for i in xrange(int(y1[1:]), int(y1[1:])+5)}
-        xtileset2 = {'{0}{1}'.format(x1[0], str(i).zfill(3)) for i in xrange(int(x1[1:]), int(x1[1:]) + 5)}
+        if x1[0] == 'W':
+            xtileset2 = {'{0}{1}'.format(x1[0], str(i).zfill(3)) for i in xrange(int(x1[1:]) - 5, int(x1[1:]))}
+        else:
+            xtileset2 = {'{0}{1}'.format(x1[0], str(i).zfill(3)) for i in xrange(int(x1[1:]), int(x1[1:])+5)}
+
+        if y1[0] == 'S':
+            ytileset2 = {'{0}{1}'.format(y1[0], str(i).zfill(3)) for i in xrange(int(y1[1:])-5, int(y1[1:]))}
+        else:
+            ytileset2 = {'{0}{1}'.format(y1[0], str(i).zfill(3)) for i in xrange(int(y1[1:]), int(y1[1:]) + 5)}
+
         for x2 in xtileset2:
             for y2 in ytileset2:
                 alos_tileurl = reduce(urlparse.urljoin,
@@ -258,6 +266,7 @@ for x1 in xtileset1:
                                        '{0}{1}/'.format(y1, x1),
                                        '{0}{1}.zip'.format(y2, x2)])
                 alos_outtile = os.path.join(alos_outdir, '{0}{1}.zip'.format(y2, x2))
+                print(alos_tileurl)
                 try:
                     if not os.path.exists(alos_outtile):
                         dlfile(url=alos_tileurl, outpath=alos_outdir, outfile=os.path.split(alos_outtile)[1],
@@ -269,11 +278,6 @@ for x1 in xtileset1:
                         print('{} was already processed...'.format(alos_outtile))
                 except:
                     traceback.print_exc()
-
-
-
-
-
 
 
 
