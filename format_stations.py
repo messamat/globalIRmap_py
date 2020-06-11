@@ -30,6 +30,7 @@ GRDCpjoin = os.path.join(outgdb, 'GRDCstations_riverjoin')
 riveratlas_csv = os.path.join(resdir, 'RiverATLAS_v10tab.csv')
 GRDCp_aeqd = os.path.join(outgdb, "GRDCstations_aeqd")
 GRDCbuf = os.path.join(outgdb, 'GRDCstations_buf50k')
+gaugebufdiss = os.path.join(outgdb, GRDCbuf + 'diss')
 
 #Create points for GRDC stations
 stations_coords = {row[0]:[row[1], row[2]]
@@ -52,6 +53,45 @@ arcpy.CopyRows_management(in_rows = riveratlas, out_table=riveratlas_csv)
 
 #------------------------------- Create grid for prediction error mapping ----------------------------------------------
 #Buffer gauging stations
+arcpy.Buffer_analysis(GRDCp, GRDCbuf, buffer_distance_or_field='50 kilometers',
+                      dissolve_option='ALL', method='GEODESIC')
+arcpy.Dissolve_management(GRDCbuf, gaugebufdiss, multi_part='FALSE')
+
+#Split
+bufgdb = os.path.join(resdir, 'gaugebuf.gdb')
+arcpy.CreateFileGDB_management(os.path.split(bufgdb)[0], os.path.split(bufgdb)[1])
+arcpy.AddField_management(gaugebufdiss, 'UID', 'SHORT')
+with arcpy.da.UpdateCursor(gaugebufdiss , 'UID') as cursor:
+    x = 0
+    for row in cursor:
+        print(x)
+        row[0] = x
+        x+=1
+        cursor.updateRow(row)
+
+arcpy.SplitByAttributes_analysis(gaugebufdiss, bufgdb, 'UID')
+
+bufrasdir = os.path.join(resdir, 'bufrasdir', 'bufras_{}proj')
+os.mkdir(bufrasdir)
+arcpy.env.workspace = bufgdb
+for buf in arcpy.ListFeatureClasses('T*', feature_type='Polygon'):
+    arcpy.env.snapRaster = hydromask
+    arcpy.env.cellSize = hydromask
+    outbufras = os.path.join(bufgdb, 'bufras_{}'.format(buf))
+    print('Processing {}...'.format(outbufras))
+    if not arcpy.Exists(outbufras):
+        arcpy.PolygonToRaster_conversion(os.path.join(bufgdb, buf), value_field='OBJECTID', out_rasterdataset=outbufras,
+                                         cellsize=arcpy.Describe(hydromask).meanCellWidth)
+
+    outbufrasproj = os.path.join(bufrasdir, 'bufras_{}proj.tif'.format(buf))
+    print('Processing {}...'.format(outbufrasproj))
+    if not arcpy.Exists(outbufrasproj):
+        arcpy.ResetEnvironments()
+        arcpy.ProjectRaster_management(in_raster=outbufras, out_raster=outbufrasproj,
+                                       out_coor_system=arcpy.SpatialReference(54032), resampling_type='NEAREST',
+                                       cell_size=500)
+
+########################################################################################################################
 hydrodir_list = {}
 for (dirpath, dirnames, filenames) in \
         arcpy.da.Walk(os.path.join(datdir, 'HydroATLAS', 'Flow_directions_20200525', 'flow_dir_15s_by_continent.gdb'),
