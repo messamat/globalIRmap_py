@@ -27,6 +27,8 @@ hydrobasin12 = os.path.join(datdir, 'Bernhard\\HydroATLAS\\HydroATLAS_v10_final_
                                     'BasinATLAS_v10_shp\\BasinATLAS_v10_lev12.shp')
 riveratlas = os.path.join(datdir, 'Bernhard\\HydroATLAS\\HydroATLAS_v10_final_data\\',
                           'RiverATLAS_v10.gdb', 'RiverATLAS_v10')
+hydroacc = os.path.join(datdir, 'Bernhard\HydroATLAS\HydroATLAS_Geometry\Accu_area_grids\upstream_area_skm_15s.gdb',
+                        'up_area_skm_15s')
 
 #US dirs
 datdir_us = os.path.join(compdatdir, 'US')
@@ -63,6 +65,9 @@ obsjoin_atlas = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlas')
 obsjoin_atlassub = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlasjoinsub')
 obsjoin_atlasnap = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnap')
 obsjoin_atlasnapedit = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnapedit')
+obsjoin_atlasnapclean = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnapclean')
+obsjoin_atlasnapcleanedit = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnapclean_edit')
+obsfinal_pnw = os.path.join(resdir_pnw, 'StreamflowPermObs_final')
 
 nhdpnw = os.path.join(resdir_pnw, 'NHDpnw')
 nhdvaapnw = os.path.join(resdir_pnw, 'NHDvaapnw')
@@ -253,12 +258,26 @@ arcpy.MakeFeatureLayer_management(obsraw_pnw, out_layer='pnwlyr',
                                   where_clause='(Use IN {}) AND (Month > 6)'.format(str(("No; Outside 2004-2016", "Yes"))))
 if not arcpy.Exists(obsub_pnw):
     arcpy.CopyFeatures_management('pnwlyr', obsub_pnw)
+
+#Flag groups of duplicates in obsub_pnw
+arcpy.AddField_management(obsub_pnw, 'dupligroup', 'SHORT')
+dupliflag = {}
+nunique = 0
+with arcpy.da.UpdateCursor(obsub_pnw, ['SHAPE@XY', 'dupligroup']) as cursor:
+    for row in cursor:
+        if row[0] not in dupliflag:
+            nunique += 1
+            row[1] = nunique
+            dupliflag[row[0]] = nunique
+        else:
+            row[1] = dupliflag[row[0]]
+        cursor.updateRow(row)
+
+#Remove duplicate locations for spatial processing
 if not arcpy.Exists(obsnodupli_pnw):
     arcpy.CopyFeatures_management('pnwlyr', obsnodupli_pnw)
 
-#Remove duplicate locations for spatial processing
 duplidel = []
-nunique = 0
 with arcpy.da.UpdateCursor(obsnodupli_pnw, ['SHAPE@XY']) as cursor:
     for row in cursor:
         if row[0] not in duplidel:
@@ -348,16 +367,63 @@ arcpy.AddField_management(obsjoin_atlasnapedit, 'snap_comment', 'TEXT')
 #Inspect all gauges > 200 m away from river atlas
 #Inspect all gauges with 0.70 < facratio < 1.30
 #manualsap: 0 when inspected and not moved, 1 when moved, -1 when to delete
+#When possible, delete points that are on the side channel of a bifurcation
+#Delete points that are too far upstream from a first order HydroSHEDS reach and that are separated from it by a relatively large tributary confluence
+#Delete points that are in areas that are messy in the NHD so that the topology can't be compared to HydroSHEDS
 
-#Delete extraneous records
+#Copy for deleting and resnapping
+arcpy.CopyFeatures_management(obsjoin_atlasnapedit, obsjoin_atlasnapclean)
+
+#Delete points with -1
+with arcpy.da.UpdateCursor(obsjoin_atlasnapclean, ['manualsnap']) as cursor:
+    for row in cursor:
+        if row[0] == -1:
+            cursor.deleteRow()
+
+#Re-snap points
+snapenv = [[riveratlas, 'EDGE', '200 meters']]
+arcpy.Snap_edit(obsjoin_atlasnapclean, snapenv)
+
+#Delete unneeded columns
+keepcols = [arcpy.Describe(obsjoin_atlasnapclean).OIDFieldName, 'Shape',
+            'OBJECTID', 'OBJECTID_2', 'OBJECTID_3', 'Source', 'Date', 'Category', 'Use', 'Edit', 'Year', 'Month',
+            'Permanent_', 'FDate', 'Resolution', 'LengthKM', 'ReachCode', 'FType', 'FCode', 'NHDPlusID',
+            'fac_km2', 'manualsnap', 'snap_comment', 'facratio']
+for f in arcpy.ListFields(obsjoin_atlasnapclean):
+    if f.name not in keepcols:
+        print('Deleting {}'.format(f.name))
+        arcpy.DeleteField_management(obsjoin_atlasnapclean, f.name)
+
+#Extract flow accumulation directly from HydroSHEDS flow accumulation grid
+ExtractMultiValuesToPoints(obsjoin_atlasnapclean, in_rasters=hydroacc, bilinear_interpolate_values='NONE')
+
+#Compute a second flow accumulation ratio for checking
+arcpy.AddField_management(obsjoin_atlasnapclean, 'facratio_2', 'FLOAT')
+with arcpy.da.UpdateCursor(obsjoin_atlasnapclean, ['facratio_2', 'fac_km2', 'up_area_skm_15s']) as cursor:
+    for row in cursor:
+        if row[2] > 0:
+            row[0] = row[1]/float(row[2])
+        else:
+            row[0] = -9999.0
+        cursor.updateRow(row)
+
+#Copy for deleting and resnapping
+arcpy.CopyFeatures_management(obsjoin_atlasnapclean, obsjoin_atlasnapcleanedit)
+arcpy.AddField_management(obsjoin_atlasnapcleanedit, 'manualsnap2', 'SHORT')
+
+#Copy to final layer
+arcpy.MakeFeatureLayer_management(obsjoin_atlasnapcleanedit, 'cleanlyr',
+                                  where_clause='(NOT manualsnap2 = -1) OR (manualsnap2 IS NULL)')
+if not arcpy.Exists(obsfinal_pnw):
+    arcpy.SpatialJoin_analysis('cleanlyr', riveratlas,
+                               out_feature_class=obsfinal_pnw, join_operation="JOIN_ONE_TO_ONE",
+                               join_type='KEEP_ALL', match_option='CLOSEST_GEODESIC', distance_field_name='distatlas')
 
 
-
-
-
-http://www.freshwaterplatform.eu/
-http://project.freshwaterbiodiversity.eu/
-http://www.lifetrivers.eu/
-http://irbas.inrae.fr/people/related-publications
-http://www.ub.edu/fem/index.php/en/inici-riunet-en
-https://onde.eaufrance.fr/content/t%C3%A9l%C3%A9charger-les-donn%C3%A9es-des-campagnes-par-ann%C3%A9e
+#######################################################################################################################
+# http://www.freshwaterplatform.eu/
+# http://project.freshwaterbiodiversity.eu/
+# http://www.lifetrivers.eu/
+# http://irbas.inrae.fr/people/related-publications
+# http://www.ub.edu/fem/index.php/en/inici-riunet-en
+# https://onde.eaufrance.fr/content/t%C3%A9l%C3%A9charger-les-donn%C3%A9es-des-campagnes-par-ann%C3%A9e
