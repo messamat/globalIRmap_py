@@ -48,6 +48,12 @@ pathcheckcreate(resdir_fr)
 outnet_fr = os.path.join(resdir_fr, 'network')
 bassel_fr = os.path.join(resdir_fr, 'hydrobasins12')
 
+#Onde Eau dirs
+datdir_onde = os.path.join(insitudatdir, 'OndeEau')
+pathcheckcreate(datdir_onde)
+resdir_onde = os.path.join(insituresdir, 'OndeEau.gdb')
+pathcheckcreate(resdir_onde)
+
 #PNW
 datdir_pnw = os.path.join(insitudatdir, 'PNW')
 pathcheckcreate(datdir_pnw)
@@ -71,6 +77,139 @@ obsfinal_pnw = os.path.join(resdir_pnw, 'StreamflowPermObs_final')
 
 nhdpnw = os.path.join(resdir_pnw, 'NHDpnw')
 nhdvaapnw = os.path.join(resdir_pnw, 'NHDvaapnw')
+
+#OndeEau data processing
+cartnet_raw =os.path.join(datdir_onde,'TronconHydrograElt_FXX.shp')
+cartnet = os.path.join(resdir_onde,'carthage_network')
+obsraw_onde= os.path.join(resdir_onde,'obsraw')
+obsnodupli_onde = os.path.join(resdir_onde, 'obsnodupli')
+
+# -------------------- FRANCE - ONDE EAU -------------------------------------------------------------------------------
+for yr in range(2012, 2021):
+    in_url = "https://onde.eaufrance.fr/sites/default/files/fichiers-telechargeables/onde_france_{}.zip".format(yr)
+    dlfile(in_url,
+           outpath=datdir_onde,
+           outfile=os.path.split(in_url)[1],
+           ignore_downloadable=True)
+
+# <LbSiteHydro>Name of site
+# <CdSiteHydro> Unique code for site
+# <Annee>Year of observation
+# <TypeCampObservations>:
+#       Usuelle: La campagne usuelle (réseau ONDE) vise à acquérir de la donnée pour la constitution d'un réseau
+#       stable de connaissance. Elle est commune à l'ensemble des départements, sa fréquence d'observation est mensuelle,
+#       au plus près du 25 de chaque mois à plus ou moins 2 jours, sur la période de mai à septembre.
+#   `   Crise:La campagne de crise (réseau ONDE) vise à acquérir de la donnée destinée aux services de l'État en charge
+#       de la gestion dela crise en période de sécheresse.
+# <DtRealObservation>': Datee of observation
+# <LbRsObservationDpt>:Observation result label (Departmental typology)
+# <RsObservationDpt>: Observation result(Department typology)
+# <LbRsObservationNat> Observation result label (National typology)
+# <RsObservationNat> Observation result (National typology)
+# <NomEntiteHydrographique>
+# <CdTronconHydrographique>
+# <CoordXSiteHydro>
+# <CoordYSiteHydro>
+# <ProjCoordSiteHydro>
+# FLG: End of line--- not useful - NOT FLAG
+
+# Download Carthage Hydrographic network
+dlfile(
+    "http://services.sandre.eaufrance.fr/telechargement/geo/ETH/BDCarthage/FXX/2017/France_metropole_entiere/SHP/TronconHydrograElt_FXX-shp.zip",
+    outpath=datdir_onde,
+    outfile="TronconHydrograElt_FXX-shp.zip",
+    ignore_downloadable=True)
+
+# Copy Carthage network to gdb
+arcpy.CopyFeatures_management(cartnet_raw, cartnet)
+
+# Merge OndeEau csv
+ondeau_mergecsv = os.path.join(datdir_onde, 'onde_france_merge.csv')
+if not arcpy.Exists(ondeau_mergecsv):
+    mergedel(dir=datdir_onde,
+             repattern="onde_france_[0-9]{4}[.]csv",
+             outfile=ondeau_mergecsv,
+             returndf=False,
+             delete=False,
+             verbose=True)
+
+# Convert to points (SpatialReference from ProjCoordSiteHydro referenced to http://mdm.sandre.eaufrance.fr/node/297134 - code 26 (247 observations also have code 2154 which must be a mistake and refers to the ESPG code)
+if not arcpy.Exists(obsraw_onde):
+    arcpy.MakeXYEventLayer_management(table=ondeau_mergecsv,
+                                      in_x_field="<CoordXSiteHydro>",
+                                      in_y_field="<CoordYSiteHydro>",
+                                      out_layer='ondelyr',
+                                      spatial_reference=arcpy.SpatialReference(
+                                          2154))  # Lambert 93 for mainland France and Corsica
+    arcpy.CopyFeatures_management('ondelyr', obsraw_onde)
+
+#Delete duplicated locations
+if not arcpy.Exists(obsnodupli_onde):
+    group_duplishape(in_features=obsraw_onde, deletedupli=True, out_featuresnodupli=obsnodupli_onde)
+
+#Join to Carthage network by Spatial Join
+obscartjoin_onde = os.path.join(resdir_onde, 'obs_cartnet_spatialjoin')
+if not arcpy.Exists(obscartjoin_onde):
+    arcpy.SpatialJoin_analysis(target_features=obsnodupli_onde,
+                               join_features=cartnet,
+                               out_feature_class=obscartjoin_onde,
+                               join_operation='JOIN_ONE_TO_ONE',
+                               join_type='KEEP_ALL',
+                               match_option='CLOSEST',
+                               distance_field_name= 'distcart')
+
+#Check all observations > 10 m from a reach (Troncon) and all those whose non-null 'CdTronconHydrographique' does not match 'CdTronconH'
+#If same name and same ID, and within 25 m. Either move to reach if > 10 m or mark 0.
+#If Onde Eau has NULL for ID but within 5 m. Mark as 0. > 5 m, check satellite imagery. If not sign of other stream, mark 0. If > 10 m, move to match.
+#If different name and/or ID, always check the ones around. If > 10 m from stream in particular, consider moving if better match.
+#Always check for close confluence
+#Even if there is an ID, always prioritize site name match to river name
+#
+
+#NULL - not checked
+#-1 - checked, delete location. No corresponding river reach (or too upstream by > 100 m)
+#0 - checked, location not adjusted
+#1 - checked, location adjusted
+#2 - checked, no corresponding river reach in Carthage, but river reach in Pella et al. 2012 theoretic river network
+
+obscartjoinedit_onde = os.path.join(resdir_onde, 'obs_cartnet_spatialjoinedit')
+
+arcpy.CopyFeatures_management(obscartjoin_onde, obscartjoinedit_onde)
+arcpy.AddField_management(obscartjoinedit_onde, 'checkjoincart', 'SHORT')
+arcpy.AddField_management(obscartjoinedit_onde, 'manualsnapcart', 'SHORT')
+
+with arcpy.da.UpdateCursor(obscartjoinedit_onde,
+                           ['distcart', 'F_CdTronconHydrographique_', 'CdTronconH', 'checkjoincart'])  as cursor:
+    for row in cursor:
+        row[3] = 0
+
+        if row[0]>10: #If distance > 10 m
+            row[3] = 1
+        elif (row[2] is not None) and (row[2] not in ['', ' ']):
+            if row[1] is not None:
+                if not re.search(re.compile(re.sub('-', '.', row[1])), row[2]): #OndeEau Codes have erroneous hyphens so use fuzzy matching where there are hyphens
+                    row[3] = 1
+            else:
+                row[3] = 1
+
+        cursor.updateRow(row)
+
+[f.name for f in arcpy.ListFields(obscartjoin_onde)]
+
+#Join Carthage network to réseau hydrographique théorique (RHT) by Pella et al.
+#Thoughts for river network matching:
+#
+# 	* Digitize to points: compute near distance to all lines within a given distance. Average distance to each nearby line.
+# 	*
+# For every subsegment, compute azimuth, average azimuth as weighted average by length
+# 	*
+# If can, get river order for each network
+# 	*
+# Slope from DEM in native resolution
+#
+#
+#
+# Maybe have a set of training and test sets of matched segments to then develop a weighting scheme through optimization
 
 ####################### REGIONAL RIVER NETWORK DATASETS WITH INTERMITTENCE DATA ########################################
 #-------------------- USA ----------------------------------------------------------------------------------------------
@@ -167,7 +306,7 @@ arcpy.AddJoin_management(in_layer_or_view='frlyr', in_field='ID_DRAIN',
                          join_table=os.path.join(datdir_fr, 'INT_RF.txt'), join_field='AllPred$ID_DRAIN')
 arcpy.CopyFeatures_management(in_features='frlyr', out_feature_class=outnet_fr)
 
-arcpy.DefineProjection_management(in_dataset=outnet_fr, coor_system=arcpy.SpatialReference(2192))
+arcpy.DefineProjection_management(in_dataset=outnet_fr, coor_system=arcpy.SpatialReference(2192)) #ED_1950_France_EuroLambert
 
 #Create a subselection of HydroSHEDS river sections that overlap with the French dataset
 arcpy.MakeFeatureLayer_management(hydrobasin12, 'hydrofr')
@@ -259,33 +398,8 @@ arcpy.MakeFeatureLayer_management(obsraw_pnw, out_layer='pnwlyr',
 if not arcpy.Exists(obsub_pnw):
     arcpy.CopyFeatures_management('pnwlyr', obsub_pnw)
 
-#Flag groups of duplicates in obsub_pnw
-arcpy.AddField_management(obsub_pnw, 'dupligroup', 'SHORT')
-dupliflag = {}
-nunique = 0
-with arcpy.da.UpdateCursor(obsub_pnw, ['SHAPE@XY', 'dupligroup']) as cursor:
-    for row in cursor:
-        if row[0] not in dupliflag:
-            nunique += 1
-            row[1] = nunique
-            dupliflag[row[0]] = nunique
-        else:
-            row[1] = dupliflag[row[0]]
-        cursor.updateRow(row)
-
-#Remove duplicate locations for spatial processing
-if not arcpy.Exists(obsnodupli_pnw):
-    arcpy.CopyFeatures_management('pnwlyr', obsnodupli_pnw)
-
-duplidel = []
-with arcpy.da.UpdateCursor(obsnodupli_pnw, ['SHAPE@XY']) as cursor:
-    for row in cursor:
-        if row[0] not in duplidel:
-            nunique += 1
-            duplidel.append(row[0])
-        else:
-            print('Delete duplicate {}...'.format(row[0]))
-            cursor.deleteRow()
+#Flag groups of duplicates in obsub_pnw (utility_functions)
+group_duplishape(in_features=obsub_pnw, deletedupli=True, out_featuresnodupli=obsnodupli_pnw)
 
 #Remove all points within 1 km of each other
 if not arcpy.Exists(sparseattri_pnw):
@@ -418,7 +532,6 @@ if not arcpy.Exists(obsfinal_pnw):
     arcpy.SpatialJoin_analysis('cleanlyr', riveratlas,
                                out_feature_class=obsfinal_pnw, join_operation="JOIN_ONE_TO_ONE",
                                join_type='KEEP_ALL', match_option='CLOSEST_GEODESIC', distance_field_name='distatlas')
-
 
 #######################################################################################################################
 # http://www.freshwaterplatform.eu/

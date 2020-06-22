@@ -40,6 +40,38 @@ rootdir = os.path.dirname(os.path.abspath(__file__)).split('\\src')[0]
 datdir = os.path.join(rootdir, 'data')
 resdir = os.path.join(rootdir, 'results')
 
+#Identify duplicated feature shapes (in 'dupligroup' field) and create a non-duplicated layer if deletedupli=True
+def group_duplishape(in_features, deletedupli=False, out_featuresnodupli=None):
+    arcpy.AddField_management(in_features, 'dupligroup', 'SHORT')
+    dupliflag = {}
+    nunique = 0
+    with arcpy.da.UpdateCursor(in_features, ['SHAPE@XY', 'dupligroup']) as cursor:
+        for row in cursor:
+            if row[0] not in dupliflag:
+                nunique += 1
+                row[1] = nunique
+                dupliflag[row[0]] = nunique
+            else:
+                row[1] = dupliflag[row[0]]
+            cursor.updateRow(row)
+    print('Wrote duplicated group membership to "dupligroup" field in {}'.format(in_features))
+
+    # Remove duplicate locations for spatial processing
+    if deletedupli:
+        if not arcpy.Exists(out_featuresnodupli):
+            arcpy.CopyFeatures_management(in_features, out_featuresnodupli)
+
+            duplidel = []
+            with arcpy.da.UpdateCursor(out_featuresnodupli, ['SHAPE@XY']) as cursor:
+                for row in cursor:
+                    if row[0] not in duplidel:
+                        nunique += 1
+                        duplidel.append(row[0])
+                    else:
+                        print('Delete duplicate {}...'.format(row[0]))
+                        cursor.deleteRow()
+        else:
+            print('{} already exists, copy+deletion cancelled...'.format(out_featuresnodupli))
 
 # Resample a dictionary of rasters (in_vardict) to the resolution of a template raster (in_hydrotemplate), outputting
 # the resampled rasters to paths contained in another dictionary (out_vardict) by keys
@@ -368,13 +400,14 @@ def pathcheckcreate(path, verbose=True):
             os.mkdir(path)
 
 #Concatenate csv files
-def mergedel(dir, repattern, outfile, delete=False, verbose=False):
+def mergedel(dir, repattern, outfile, returndf=False, delete=False, verbose=False):
     flist = getfilelist(dir, repattern)
-    pd.concat([pd.read_csv(file, index_col=[0], parse_dates=[0])
+    df = pd.concat([pd.read_csv(file, index_col=[0], parse_dates=[0])
                for file in flist],
               axis=0) \
-        .sort_index() \
-        .to_csv(outfile)
+        .sort_index()
+
+    df.to_csv(outfile)
     print('Merged and written to {}'.format(outfile))
 
     if delete == True:
@@ -382,6 +415,9 @@ def mergedel(dir, repattern, outfile, delete=False, verbose=False):
             os.remove(tab)
             if verbose == True:
                 print('Delete {}'.format(tab))
+
+    if returndf == True:
+        return(df)
 
 def is_downloadable(url):
     """
