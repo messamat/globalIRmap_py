@@ -18,12 +18,14 @@ insituresdir = os.path.join(resdir, 'Insitu_databases')
 pathcheckcreate(compdatdir)
 pathcheckcreate(compresdir)
 
-hydrobasin12 = os.path.join(datdir, 'Bernhard\\HydroATLAS\\HydroATLAS_v10_final_data\\'
-                                    'BasinATLAS_v10_shp\\BasinATLAS_v10_lev12.shp')
-riveratlas = os.path.join(datdir, 'Bernhard\\HydroATLAS\\HydroATLAS_v10_final_data\\',
-                          'RiverATLAS_v10.gdb', 'RiverATLAS_v10')
-hydroacc = os.path.join(datdir, 'Bernhard\HydroATLAS\HydroATLAS_Geometry\Accu_area_grids\upstream_area_skm_15s.gdb',
-                        'up_area_skm_15s')
+hydrodir = os.path.join(datdir, 'Bernhard\HydroATLAS')
+hydrogeomdir = os.path.join(hydrodir, 'HydroATLAS_Geometry')
+hydrobasin12 = os.path.join(hydrodir, 'HydroATLAS_v10_final_data\\', 'BasinATLAS_v10_shp\\BasinATLAS_v10_lev12.shp')
+riveratlas = os.path.join(hydrodir, 'HydroATLAS_v10_final_data\\', 'RiverATLAS_v10.gdb', 'RiverATLAS_v10')
+hydroacc = os.path.join(hydrogeomdir, 'Accu_area_grids\upstream_area_skm_15s.gdb', 'up_area_skm_15s')
+hydrolink = os.path.join(hydrogeomdir, 'Link_zone_grids', 'link_stream.gdb', 'link_str_arc')
+hydrodisras = os.path.join(hydrodir, 'HydroATLAS_Data\Hydrology\discharge_wg22_1971_2000.gdb',
+                                  'dis_nat_wg22_ls_year')
 
 #USwide dirs
 datdir_us = os.path.join(compdatdir, 'US')
