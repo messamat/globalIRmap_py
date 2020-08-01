@@ -61,12 +61,12 @@ arcpy.CopyFeatures_management(cartnet_raw, cartnet)
 
 # Merge OndeEau csv
 if not arcpy.Exists(ondeau_mergecsv):
-    mergedel(dir=datdir,
-             repattern="onde_france_[0-9]{4}[.]csv",
-             outfile=ondeau_mergecsv,
-             returndf=False,
-             delete=False,
-             verbose=True)
+    mergedelcsv(dir=datdir,
+                repattern="onde_france_[0-9]{4}[.]csv",
+                outfile=ondeau_mergecsv,
+                returndf=False,
+                delete=False,
+                verbose=True)
 
 # Convert to points (SpatialReference from ProjCoordSiteHydro referenced to http://mdm.sandre.eaufrance.fr/node/297134 - code 26 (247 observations also have code 2154 which must be a mistake and refers to the ESPG code)
 if not arcpy.Exists(obsraw):
@@ -250,31 +250,6 @@ neardf['CARTtoATLAS_dist'] = neardf['distsum']/neardf['nvertu1k'].astype(float)
 #     iddf.columns = [arcpy.Describe(in_feature).OIDFieldName, IDfield]
 #     return(iddf)
 
-def get_arctab_df(in_tab, IDfield='OID@', valuefields='*', resetid = False):
-    if IDfield == 'OID@':
-        IDfield = arcpy.Describe(in_tab).OIDFieldName
-    if valuefields == '*':
-        valuefields = [f.name for f in arcpy.ListFields(in_tab)]
-        valuefields.remove(IDfield)
-
-    if isinstance(valuefields, list):
-        fl = valuefields
-        fl.insert(0, IDfield)
-    else:
-        fl = [IDfield, valuefields]
-
-    ddict = {row[0]: row[1:] for row in arcpy.da.SearchCursor(in_tab, fl)}
-
-    df = pd.DataFrame.from_dict(ddict, 'index')
-    if resetid:
-        df.reset_index(inplace=True)
-    else:
-        fl.remove(IDfield)
-
-    df.columns = fl
-
-    return(df)
-
 obsiddf = get_arctab_df(in_tab=obscartjoinclean, IDfield='OID@', valuefields='F_CdSiteHydro_', resetid=True)
 atlasiddf = get_arctab_df(in_tab=atlassub1000, IDfield='OID@', valuefields='HYRIV_ID', resetid=True)
 obsatlasneardf = get_arctab_df(in_tab=obsatlas_near, IDfield='OID@', valuefields=['IN_FID', 'NEAR_FID', 'NEAR_DIST'])
@@ -286,43 +261,6 @@ nearptdf = nearptdf.drop([f for f in ['OBJECTID', 'OBJECTID_x', 'OBJECTID_y', 'I
 nearptdf.columns = ['OBStoATLAS_dist'] + list(nearptdf.columns[1:])
 
 ### Compute bearing
-#Compute average bearing for each line
-def projdistbearpt(x1, y1, x2, y2):
-    # Distance between the two points
-    dist = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-    # Angle (counterclockwise)
-    if y2-y1 > 0:
-        angle = ((math.atan((x2 - x1) / (y2 - y1)) * 180 / math.pi) - 90)
-    else:
-        angle = -90
-
-    # Revert direction (clockwise) to get bearing from north
-    if angle > 0:
-        bearing = 360 - angle
-    else:
-        bearing = -angle
-
-    return ([dist, bearing])
-
-#Append XY position of all vertices for each line
-def linevert_wbearing(in_vert, in_IDfield):
-    vertazdict = defaultdict(list)
-    with arcpy.da.SearchCursor(in_vert, [in_IDfield, 'SHAPE@XY']) as cursor:
-        for row in cursor:
-            vertazdict[row[0]].append(row[1])
-
-    #Replace vertazdict values with average bearing (out of 360)
-    for k, v in vertazdict.iteritems():
-        wanglesum = 0
-        distsum = 0
-        for v1, v2 in zip(v[:-1], v[1:]):
-            distbear = projdistbearpt(v1[0], v1[1], v2[0], v2[1])
-            wanglesum += distbear[0] * distbear[1]
-            distsum += distbear[0]
-        vertazdict[k] = wanglesum/float(distsum)
-
-    return(vertazdict)
-
 hydrobear = pd.DataFrame.from_dict(
     linevert_wbearing(in_vert=atlasvert, in_IDfield='HYRIV_ID'),
     'index').reset_index()
@@ -443,27 +381,6 @@ with arcpy.da.UpdateCursor(obsfinal, ['HYRIV_IDjoinedit', 'F_CdSiteHydro_']) as 
             continue
 
 # Snap to specific feature (create fast function)
-def indivsnap(in_features, in_field, join_field, indivsnap_env):
-    arcpy.MakeFeatureLayer_management(in_features, 'obslyr')
-    arcpy.MakeFeatureLayer_management(indivsnap_env[0][0], 'netlyr')
-
-    oidfn = arcpy.Describe(in_features).OIDFieldName
-
-    try:
-        with arcpy.da.SearchCursor(in_features, [oidfn, in_field]) as cursor:
-            for row in cursor:
-                print(row[0])
-                arcpy.SelectLayerByAttribute_management('obslyr', 'NEW_SELECTION', '{0} = {1}'.format(oidfn, row[0]))
-                arcpy.SelectLayerByAttribute_management('netlyr', 'NEW_SELECTION', '{0} = {1}'.format(join_field, row[1]))
-                indivsnap_env[0][0] = 'netlyr'
-
-                arcpy.Snap_edit('obslyr', indivsnap_env)
-    except Exception:
-        print("Exception in user code:")
-        traceback.print_exc(file=sys.stdout)
-        arcpy.Delete_management('obslyr')
-        arcpy.Delete_management('netlyr')
-
 indivsnap(in_features = obsfinal,
           in_field = 'HYRIV_IDjoinedit',
           join_field = 'HYRIV_ID',
@@ -509,57 +426,25 @@ if not all(v in [f for f in arcpy.ListFields(obsfinal)] for v in ['HYDROSHEDSdis
     arcpy.AlterField_management(obsfinal, 'UPLAND_SKM', new_field_name='HYDROSHEDSDA', new_field_alias='HYDROSHEDSDA')
 
 # Extract upstream area and discharge for the point and ratio of point upstream area to line's pourpoint upstream area
-arcpy.Project_management(obsfinal, obsfinal_wgs, out_coor_system=arcpy.Describe(hydrolink).SpatialReference)
-if not all(v in [f for f in arcpy.ListFields(obsfinal_wgs)] for v in ['POINTdis', 'POINTDA']):
-    arcpy.AddField_management(obsfinal_wgs, 'POINTdis', 'DOUBLE')
-    arcpy.AddField_management(obsfinal_wgs, 'POINTDA', 'DOUBLE')
+if not arcpy.Exists(obsfinal_wgs):
+    arcpy.Project_management(obsfinal, obsfinal_wgs, out_coor_system=arcpy.Describe(hydrolink).SpatialReference)
+    arcpy.RepairGeometry_management(obsfinal_wgs)
 
-arcpy.MakeFeatureLayer_management(obsfinal_wgs, 'obsfinal_wgslyr')
-arcpy.MakeFeatureLayer_management(atlassub, 'netlyr')
+extract_obsdisacc(in_obs=obsfinal_wgs,
+                  in_net=atlassub,
+                  obsin_field='HYRIV_IDjoinedit',
+                  netjoin_field='HYRIV_ID',
+                  in_diss=hydrodisras,
+                  in_acc=hydroacc,
+                  resdir=resdir,
+                  delintermediate=False)
 
-oidfn = arcpy.Describe(obsfinal_wgs).OIDFieldName
-
-arcpy.env.snapRaster = hydroacc
-templine = os.path.join(resdir, 'templine')
-tempres = arcpy.Describe(hydroacc).meanCellWidth
-tempras = os.path.join(resdir, 'tempnetras')
-subacc = os.path.join(resdir, 'subacc')
-subdis = os.path.join(resdir, 'subdis')
-with arcpy.da.SearchCursor(obsfinal_wgs, [oidfn, 'HYRIV_IDjoinedit']) as cursor:
-    for row in cursor:
-        print(row[0])
-        outtab = os.path.join(resdir, 'stat{}'.format(row[0]))
-        if not arcpy.Exists(outtab):
-            arcpy.SelectLayerByAttribute_management('obsfinal_wgslyr', 'NEW_SELECTION', '{0} = {1}'.format(oidfn, row[0]))
-            arcpy.SelectLayerByAttribute_management('netlyr', 'NEW_SELECTION', '{0} = {1}'.format('HYRIV_ID', row[1]))
-            arcpy.CopyFeatures_management('netlyr', templine)
-
-            arcpy.env.extent = arcpy.Describe(templine).extent
-            arcpy.PolylineToRaster_conversion(templine,
-                                              value_field='HYRIV_ID',
-                                              out_rasterdataset=tempras,
-                                              cellsize= tempres)
-
-            EucAllocation(Int(0.5+ 100*Con(Raster(tempras) == row[1], hydroacc)),
-                          maximum_distance=tempres*2).save(subacc)
-            EucAllocation(Int(0.5+ 100*Con(Raster(tempras) == row[1], hydrodisras)),
-                          maximum_distance=tempres*2).save(subdis)
-
-            Sample(in_rasters=[subacc, subdis],
-                   in_location_data='obsfinal_wgslyr',
-                   out_table=outtab,
-                   resampling_type='NEAREST'
-                   )
-
-            arcpy.ClearEnvironment('extent')
-
-exvaldict = {row[0] : [row[1], row[2]]
-             for tab in getfilelist(resdir, 'stat[0-9]+')
-             for row in arcpy.da.SearchCursor(tab, [oidfn, 'subdis_Band_1', 'subacc_Band_1'])
-             }
-
-with arcpy.da.UpdateCursor(obsfinal_wgs, [oidfn, 'POINTdis', 'POINTDA']) as cursor:
-    for row in cursor:
-        row[1] = exvaldict[row[0]][0]
-        row[2] = exvaldict[row[0]][1]
-        cursor.updateRow(row)
+#Run a second time as sometimes a couple of obs don't compute
+extract_obsdisacc(in_obs=obsfinal_wgs,
+                  in_net=atlassub,
+                  obsin_field='HYRIV_IDjoinedit',
+                  netjoin_field='HYRIV_ID',
+                  in_diss=hydrodisras,
+                  in_acc=hydroacc,
+                  resdir=resdir,
+                  delintermediate=True)
