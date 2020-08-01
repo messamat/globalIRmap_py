@@ -400,15 +400,16 @@ def pathcheckcreate(path, verbose=True):
             os.mkdir(path)
 
 #Concatenate csv files
-def mergedel(dir, repattern, outfile, returndf=False, delete=False, verbose=False):
+def mergedelcsv(dir, repattern=None, skiprows=None, outfile=None, returndf=False, delete=False, verbose=False):
     flist = getfilelist(dir, repattern)
-    df = pd.concat([pd.read_csv(file, index_col=[0], parse_dates=[0])
-               for file in flist],
-              axis=0) \
+    df = pd.concat([pd.read_csv(file, index_col=[0], parse_dates=[0], skiprows=skiprows)
+                    for file in flist],
+                   axis=0) \
         .sort_index()
 
-    df.to_csv(outfile)
-    print('Merged and written to {}'.format(outfile))
+    if outfile is not None:
+        df.to_csv(outfile)
+        print('Merged and written to {}'.format(outfile))
 
     if delete == True:
         for tab in flist:
