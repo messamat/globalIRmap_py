@@ -6,6 +6,10 @@ pathcheckcreate(datdir_pnw)
 resdir_pnw = os.path.join(insituresdir, 'pnw.gdb')
 pathcheckcreate(resdir_pnw)
 
+atlassub = os.path.join(resdir_pnw, 'RiverAtlas_sub')
+atlassubproj = os.path.join(resdir_pnw, 'RiverAtlas_subproj')
+atlassubroute = os.path.join(resdir_pnw, 'RiverAtlas_subroute')
+
 facraw_pnw = os.path.join(datdir_pnw, 'fac_taudem_17all_int.tif')
 obsraw_pnw = os.path.join(datdir_pnw, 'StreamflowPermObs.shp')
 obsub_pnw = os.path.join(resdir_pnw, 'StreamflowPermObs_sub')
@@ -18,14 +22,15 @@ obsjoin_atlassub = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlasjoinsub
 obsjoin_atlasnap = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnap')
 obsjoin_atlasnapedit = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnapedit')
 obsjoin_atlasnapclean = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnapclean')
-obsjoin_atlasnapcleanedit = os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnapclean_edit')
 obsfinal_pnw = os.path.join(resdir_pnw, 'StreamflowPermObs_final')
+obsfinal_pnw_locatetab = os.path.join(resdir_pnw, 'StreamflowPermObs_final_atlas_locate')
+obsfinal_pnw_wgs = os.path.join(resdir_pnw, 'StreamflowPermObs_finalwgs')
 
 nhdpnw = os.path.join(resdir_pnw, 'NHDpnw')
 nhdvaapnw = os.path.join(resdir_pnw, 'NHDvaapnw')
 
 
-#Only keep points for which use is:
+#Only keep points for which use is "No; Outside 2004-2016", "Yes" and observation was made after June:
 arcpy.MakeFeatureLayer_management(obsraw_pnw, out_layer='pnwlyr',
                                   where_clause='(Use IN {}) AND (Month > 6)'.format(str(("No; Outside 2004-2016", "Yes"))))
 if not arcpy.Exists(obsub_pnw):
@@ -67,16 +72,33 @@ with arcpy.da.UpdateCursor(obsjoin_pnw, ['facnhd', 'facnhd_km2']) as cursor:
             row[1] = row[0]*900/float(10**6)
             cursor.updateRow(row)
 
+#Select RiverATLAS segments within 50 kilometers from any observation
+#Re-project observations to wgs
+arcpy.CopyFeatures_management(arcpy.Describe(obsub_pnw).extent.polygon,
+                              os.path.join(resdir_pnw, 'obspoly'))
+arcpy.Project_management(os.path.join(resdir_pnw, 'obspoly'),
+                         os.path.join(resdir_pnw, 'obspolyproj'),
+                         riveratlas)
+
+#Select all RiverATLAS reaches within  50 kilometers from extent
+arcpy.MakeFeatureLayer_management(riveratlas, 'atlaslyr')
+arcpy.SelectLayerByLocation_management(in_layer='atlaslyr', #First select all RiverAtlas reaches intersecting the extent of the observations
+                                       overlap_type="INTERSECT",
+                                       select_features=os.path.join(resdir_pnw, 'obspolyproj'),
+                                       selection_type='NEW_SELECTION',
+                                       search_distance='50 kilometers')
+arcpy.CopyFeatures_management('atlaslyr', atlassub)
+
 #Spatial join to RiverATLAS and compute ratio of drainage areas bqsed on the line
 obsjoin_pnwproj = "{}_proj".format(obsjoin_pnw)
-arcpy.Project_management(obsjoin_pnw, obsjoin_pnwproj, out_coor_system=riveratlas)
+arcpy.Project_management(obsjoin_pnw, obsjoin_pnwproj, out_coor_system=atlassub)
 if not arcpy.Exists(obsjoin_pnw):
-    arcpy.SpatialJoin_analysis(obsjoin_pnwproj, riveratlas,
+    arcpy.SpatialJoin_analysis(obsjoin_pnwproj, atlassub,
                                out_feature_class=obsjoin_atlas, join_operation="JOIN_ONE_TO_ONE",
                                join_type='KEEP_ALL', match_option='CLOSEST_GEODESIC', distance_field_name='distatlas')
 
 arcpy.AddField_management(obsjoin_atlas, 'facratio_line', 'FLOAT')
-with arcpy.da.UpdateCursor(obsjoin_atlas, ['facnhd_km2', 'UPLAND_SKM', 'facratio']) as cursor:
+with arcpy.da.UpdateCursor(obsjoin_atlas, ['facnhd_km2', 'UPLAND_SKM', 'facratio_line']) as cursor:
     for row in cursor:
         if row[0] is not None:
             row[2] = row[1]/float(row[0])
@@ -85,12 +107,12 @@ with arcpy.da.UpdateCursor(obsjoin_atlas, ['facnhd_km2', 'UPLAND_SKM', 'facratio
 #Remove those that are over 500 m away and NHDplus upstream area < 10 km2 OR > 1000 m
 arcpy.MakeFeatureLayer_management(obsjoin_atlas, 'atlasjoinlyr',
                                   where_clause='NOT ((((distatlas > 500) OR (facratio_line > 3)) AND (facnhd_km2 < 10)) '
-                                               'OR (facnhd_km2 Is Null)) OR (')
+                                               'OR (facnhd_km2 Is Null))')
 arcpy.CopyFeatures_management('atlasjoinlyr', obsjoin_atlassub)
 
 #Snap all those that are within 1000 m from a RiverATLAS segment
 arcpy.CopyFeatures_management(obsjoin_atlassub, obsjoin_atlasnap)
-snapenv = [[riveratlas, 'EDGE', '1000 meters']]
+snapenv = [[atlassub, 'EDGE', '1000 meters']]
 arcpy.Snap_edit(obsjoin_atlasnap, snapenv)
 
 #Extract flow accumulation directly from HydroSHEDS flow accumulation grid
@@ -126,15 +148,18 @@ arcpy.AddField_management(obsjoin_atlasnapedit, 'manualsnap', 'SHORT')
 arcpy.AddField_management(obsjoin_atlasnapedit, 'snap_comment', 'TEXT')
 
 ######## INSPECT AND EDIT MANUALLY ##############
+#Overlay HydroSHEDS network with fac_taudem_17all_int.tif with points from Shane et al. 2017
 #Inspect all gauges > 200 m away from river atlas
-#Inspect all gauges with 0.70 < facratio < 1.30
+#Inspect all gauges with 0.90 < facratio_ras < 1.10
 #manualsap: 0 when inspected and not moved, 1 when moved, -1 when to delete
 #When possible, delete points that are on the side channel of a bifurcation
-#Delete points that are too far upstream from a first order HydroSHEDS reach and that are separated from it by a relatively large tributary confluence
+#Delete points that are > 500 m upstream from a first order HydroSHEDS reach
+#Delete points that are on a tributary rather than on the HydroSHEDS main stem OR those that are simply not represented
 #Delete points that are in areas that are messy in the NHD so that the topology can't be compared to HydroSHEDS
 
 #Copy for deleting and resnapping
-arcpy.CopyFeatures_management(obsjoin_atlasnapedit, obsjoin_atlasnapclean)
+arcpy.CopyFeatures_management(os.path.join(resdir_pnw, 'StreamflowPermObs_RiverAtlassnapedit20200720'),
+                              obsjoin_atlasnapclean)
 
 #Delete points with -1
 with arcpy.da.UpdateCursor(obsjoin_atlasnapclean, ['manualsnap']) as cursor:
@@ -143,27 +168,79 @@ with arcpy.da.UpdateCursor(obsjoin_atlasnapclean, ['manualsnap']) as cursor:
             cursor.deleteRow()
 
 #Re-snap points
-snapenv = [[riveratlas, 'EDGE', '200 meters']]
+snapenv = [[atlassub, 'EDGE', '10 meters']]
 arcpy.Snap_edit(obsjoin_atlasnapclean, snapenv)
 
 #Delete unneeded columns
 keepcols = [arcpy.Describe(obsjoin_atlasnapclean).OIDFieldName, 'Shape',
             'OBJECTID', 'OBJECTID_2', 'OBJECTID_3', 'Source', 'Date', 'Category', 'Use', 'Edit', 'Year', 'Month',
             'Permanent_', 'FDate', 'Resolution', 'LengthKM', 'ReachCode', 'FType', 'FCode', 'NHDPlusID',
-            'fac_km2', 'manualsnap', 'snap_comment', 'facratio']
+            'fac_km2', 'manualsnap', 'facratio']
 for f in arcpy.ListFields(obsjoin_atlasnapclean):
     if f.name not in keepcols:
         print('Deleting {}'.format(f.name))
         arcpy.DeleteField_management(obsjoin_atlasnapclean, f.name)
 
-#Copy for deleting and resnapping
-arcpy.CopyFeatures_management(obsjoin_atlasnapclean, obsjoin_atlasnapcleanedit)
-arcpy.AddField_management(obsjoin_atlasnapcleanedit, 'manualsnap2', 'SHORT')
+#Re-join to HydroSHEDS
+arcpy.SpatialJoin_analysis(obsjoin_atlasnapclean, atlassub,
+                           out_feature_class=obsfinal_pnw, join_operation="JOIN_ONE_TO_ONE",
+                           join_type='KEEP_ALL', match_option='INTERSECT', distance_field_name='distatlas')
 
-#Copy to final layer
-arcpy.MakeFeatureLayer_management(obsjoin_atlasnapcleanedit, 'cleanlyr',
-                                  where_clause='(NOT manualsnap2 = -1) OR (manualsnap2 IS NULL)')
-if not arcpy.Exists(obsfinal_pnw):
-    arcpy.SpatialJoin_analysis('cleanlyr', riveratlas,
-                               out_feature_class=obsfinal_pnw, join_operation="JOIN_ONE_TO_ONE",
-                               join_type='KEEP_ALL', match_option='CLOSEST_GEODESIC', distance_field_name='distatlas')
+#Compute how far down the line the site is as length and percentage of line's length
+if not all(v in [f for f in arcpy.ListFields(atlassub)] for v in ['fromM', 'toM']):
+    arcpy.AddField_management(atlassub, 'fromM', 'DOUBLE')
+    arcpy.AddField_management(atlassub, 'toM', 'DOUBLE')
+
+    with arcpy.da.UpdateCursor(atlassub, ['fromM', 'toM', 'SHAPE@LENGTH']) as cursor:
+        for row in cursor:
+            row[0] = 0
+            row[1] = row[2]
+            cursor.updateRow(row)
+
+if not arcpy.Exists(atlassubroute):
+    arcpy.CreateRoutes_lr(in_line_features=atlassub,
+                          route_id_field='HYRIV_ID',
+                          out_feature_class=atlassubroute,
+                          measure_source='TWO_FIELDS',
+                          from_measure_field='fromM',
+                          to_measure_field='toM')
+
+if not arcpy.Exists(obsfinal_pnw_locatetab):
+    arcpy.LocateFeaturesAlongRoutes_lr(in_features=obsfinal_pnw,
+                                       in_routes=atlassubroute,
+                                       route_id_field='HYRIV_ID',
+                                       radius_or_tolerance='0.1',
+                                       out_table=obsfinal_pnw_locatetab,
+                                       out_event_properties= "HYRIV_ID POINT fromM toM",
+                                       route_locations='FIRST',
+                                       in_fields='NO_FIELDS')
+
+if not all(v in [f for f in arcpy.ListFields(obsfinal_pnw)] for v in ['HYDROSHEDSdis', 'HYDROSHEDSDA']):
+    arcpy.JoinField_management(in_data=obsfinal_pnw, in_field=arcpy.Describe(obsfinal_pnw).OIDFieldName,
+                               join_table=obsfinal_pnw_locatetab, join_field='INPUTOID', fields='fromM')
+    arcpy.JoinField_management(in_data=obsfinal_pnw, in_field='HYRIV_ID',
+                               join_table=atlassub, join_field='HYRIV_ID',
+                               fields=['Shape_Length', 'dis_m3_pyr', 'UPLAND_SKM'])
+    arcpy.AlterField_management(obsfinal_pnw, 'dis_m3_pyr', new_field_name='HYDROSHEDSdis', new_field_alias='HYDROSHEDSdis')
+    arcpy.AlterField_management(obsfinal_pnw, 'UPLAND_SKM', new_field_name='HYDROSHEDSDA', new_field_alias='HYDROSHEDSDA')
+
+# Extract upstream area and discharge for the point and ratio of point upstream area to line's pourpoint upstream area
+if not arcpy.Exists(obsfinal_pnw_wgs):
+    arcpy.Project_management(obsfinal_pnw, obsfinal_pnw_wgs, out_coor_system=arcpy.Describe(hydroacc).SpatialReference)
+
+extract_obsdisacc(in_obs=obsfinal_pnw_wgs,
+                  in_net=atlassub,
+                  obsin_field='HYRIV_ID',
+                  netjoin_field='HYRIV_ID',
+                  in_diss=hydrodisras,
+                  in_acc=hydroacc,
+                  resdir=resdir_pnw,
+                  delintermediate=False)
+extract_obsdisacc(in_obs=obsfinal_pnw_wgs,
+                  in_net=atlassub,
+                  obsin_field='HYRIV_ID',
+                  netjoin_field='HYRIV_ID',
+                  in_diss=hydrodisras,
+                  in_acc=hydroacc,
+                  resdir=resdir_pnw,
+                  delintermediate=True)
