@@ -152,34 +152,35 @@ def extract_obsdisacc(in_obs, in_net, obsin_field, netjoin_field, in_diss, in_ac
         with arcpy.da.SearchCursor(in_obs, [oidfn, obsin_field, 'SHAPE@XY', 'POINTdis']) as cursor:
             for row in cursor:
                 outtab = os.path.join(resdir, 'stat{}'.format(row[0]))
-                if (not arcpy.Exists(outtab)) or (row[3] is None and arcpy.Exists(outtab)):
-                    print(row[0])
-                    arcpy.CopyFeatures_management(arcpy.PointGeometry(arcpy.Point(row[2][0], row[2][1])),
-                                                  temppt)
-                    arcpy.DefineProjection_management(temppt, refsr)
+                if (not arcpy.Exists(outtab)): #or (row[3] is None and arcpy.Exists(outtab)):
+                    if row[1] is not None:
+                        print(row[0])
+                        arcpy.CopyFeatures_management(arcpy.PointGeometry(arcpy.Point(row[2][0], row[2][1])),
+                                                      temppt)
+                        arcpy.DefineProjection_management(temppt, refsr)
 
-                    arcpy.SelectLayerByAttribute_management('netlyr', 'NEW_SELECTION',
-                                                            '{0} = {1}'.format(netjoin_field, row[1]))
-                    arcpy.CopyFeatures_management('netlyr', templine)
+                        arcpy.SelectLayerByAttribute_management('netlyr', 'NEW_SELECTION',
+                                                                '{0} = {1}'.format(netjoin_field, row[1]))
+                        arcpy.CopyFeatures_management('netlyr', templine)
 
-                    arcpy.env.extent = expand_extent(arcpy.Describe(templine).extent, dist=refres * 2)
-                    arcpy.PolylineToRaster_conversion(templine,
-                                                      value_field='HYRIV_ID',
-                                                      out_rasterdataset=tempras,
-                                                      cellsize=refres)
+                        arcpy.env.extent = expand_extent(arcpy.Describe(templine).extent, dist=refres * 2)
+                        arcpy.PolylineToRaster_conversion(templine,
+                                                          value_field='HYRIV_ID',
+                                                          out_rasterdataset=tempras,
+                                                          cellsize=refres)
 
-                    EucAllocation(Int(0.5 + 100 * Con(Raster(tempras) == row[1], in_acc)),
-                                  maximum_distance=refres * 2).save(subacc)
-                    EucAllocation(Int(0.5 + 100 * Con(Raster(tempras) == row[1], in_diss)),
-                                  maximum_distance=refres * 2).save(subdis)
+                        EucAllocation(Int(0.5 + 100 * Con(Raster(tempras) == row[1], in_acc)),
+                                      maximum_distance=refres * 2).save(subacc)
+                        EucAllocation(Int(0.5 + 100 * Con(Raster(tempras) == row[1], in_diss)),
+                                      maximum_distance=refres * 2).save(subdis)
 
-                    Sample(in_rasters=[subacc, subdis],
-                           in_location_data=temppt,
-                           out_table=outtab,
-                           resampling_type='NEAREST'
-                           )
+                        Sample(in_rasters=[subacc, subdis],
+                               in_location_data=temppt,
+                               out_table=outtab,
+                               resampling_type='NEAREST'
+                               )
 
-                    arcpy.ClearEnvironment('extent')
+                        arcpy.ClearEnvironment('extent')
 
         exvaldict = {}
         for tab in getfilelist(resdir, 'stat[0-9]+'):
@@ -198,6 +199,7 @@ def extract_obsdisacc(in_obs, in_net, obsin_field, netjoin_field, in_diss, in_ac
         arcpy.ClearEnvironment('snapRaster')
 
         if delintermediate == True:
+            print('Deleting all tables...')
             for tab in getfilelist(resdir, 'stat[0-9]+'):
                 arcpy.Delete_management(tab)
 
