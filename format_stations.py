@@ -20,6 +20,7 @@ arcpy.env.qualifiedFieldNames = 'False'
 #Input variables
 riveratlas = os.path.join(datdir, 'HydroATLAS', 'RiverATLAS_v10.gdb', 'RiverATLAS_v10')
 riveratlasv11 = os.path.join(datdir, 'HydroATLAS', 'RiverATLAS_v11.gdb', 'RiverATLAS_v11')
+basinatlasl05 = os.path.join(datdir, 'HydroATLAS', 'BasinATLAS_v10.gdb', 'BasinATLAS_v10_lev05')
 hydromask = os.path.join(datdir, 'HydroATLAS', 'Masks_20200525','hydrosheds_landmask_15s.gdb', 'hys_land_15s')
 
 #Output variables
@@ -33,6 +34,8 @@ riveratlasv11_csv = os.path.join(resdir, 'RiverATLAS_v11tab.csv')
 grdcstations = os.path.join(datdir, 'grdc_curated', 'high_qual_daily_stations.csv')
 grdcp = os.path.join(outgdb, 'grdcstations')
 grdcpjoin = os.path.join(outgdb, 'grdcstations_riverjoin')
+basin5grdcpjoin = os.path.join(outgdb, 'BasinATLAS_v10_lev05_GRDCstations_join')
+
 grdcp_aeqd = os.path.join(outgdb, "grdcstations_aeqd")
 grdcbuf = os.path.join(outgdb, 'grdcstations_buf50k')
 gaugebufdiss = os.path.join(outgdb, grdcbuf + 'diss')
@@ -77,6 +80,18 @@ if not arcpy.Exists(riveratlas_csv):
     arcpy.CopyRows_management(in_rows = riveratlas, out_table=riveratlas_csv)
 if not arcpy.Exists(riveratlasv11_csv):
     arcpy.CopyRows_management(in_rows=riveratlasv11, out_table=riveratlasv11_csv)
+
+#Compute gauging intensity by BasinATLAS_v10_lev08
+if not arcpy.Exists(basin5grdcpjoin):
+    arcpy.SpatialJoin_analysis(target_features=basinatlasl05,
+                               join_features=grdcp,
+                               out_feature_class=basin5grdcpjoin,
+                               join_operation='JOIN_ONE_TO_ONE',
+                               join_type="KEEP_COMMON",
+                               match_option='INTERSECT')
+
+basgrdcpdict = {row[0] : [row[1], row[2]] for row in
+             arcpy.da.SearchCursor(basin5grdcpjoin, ['HYBAS_ID', 'Join_Count', 'SUB_AREA'])}
 
 ######################################## FORMAT GSIM STATIONS ##########################################################
 #Replace points with underscores in metadata table and import into geodatabase with correct field types
@@ -133,17 +148,92 @@ gsimsub_modf = pd.concat([format_gsimmontab(file, filterlist=gsimsubno) for file
                          axis=0) \
     .sort_index()
 
-gsimsub_modf['year'] = gsimsub_modf['date']
-gsimsub_modf['month'] =
-gsimsub_modf['day'] =
+gsimsub_modf['year'] = gsimsub_modf['date'].str.slice(start=0, stop=4)
+gsimsub_modf['month'] = gsimsub_modf['date'].str.slice(start=5, stop=7)
+gsimsub_modf['day'] = gsimsub_modf['date'].str.slice(start=8, stop=10)
 
 #Only keep those that have at least 10 years of data, only counting years with less than 20 days of missing data,
-#and that have average discharge of at least 0.01 m3/s OR a reported drainage area >= 9 km2
+gsimsub_modf_ymiss = pd.merge(gsimsub_modf,
+                              gsimsub_modf.groupby(['gsim_no','year'], as_index=False)['n.available'].sum(),
+                              on=['gsim_no', 'year'], suffixes=('', '_yearsum'))
+gsimsub_modf_u20miss = gsimsub_modf_ymiss[gsimsub_modf_ymiss['n.available_yearsum'] >= 345]
+
+
+#Compute average discharge for years with < 20 missing days
+gsimsub_annualdiss = gsimsub_modf_u20miss.groupby('gsim_no')['MEAN'].mean().reset_index()
+
+#Get reported drainage area
+gsimsub_area = pd.DataFrame.from_dict({row[0]:row[1] for row in
+                                       arcpy.da.SearchCursor(gsimpsub, ['gsim_no', 'area'])},
+                                      orient='index').reset_index()
+gsimsub_area.columns = ['gsim_no', 'area']
+
+#Compute proportion of months (within years with < 20 missing days) that have MIN==0
+gsimsub_modf_u20miss_interprop = gsimsub_modf_u20miss.groupby('gsim_no')['MIN'].agg(lambda x: x.eq(0).sum()/float(x.count()))
+
+#Merge number of years with < 20 missing days, drainage area, mean annual discharge, and intermittency proportion
+gsimsub_selstats = pd.merge(gsimsub_modf_u20miss_interprop,
+                            pd.merge(
+                                pd.merge(gsimsub_annualdiss,
+                                         gsimsub_area, on='gsim_no'),
+                                gsimsub_modf_u20miss.groupby('gsim_no')['year'].nunique().reset_index(),
+                                on='gsim_no', suffixes=['', '_keptcount']),
+                            on='gsim_no')
+gsimsub_selstats.columns = ['gsim_no', 'ir_moprop', 'myrdiss', 'DA', 'years_kept']
+
+#Only keep those with mean dis > 0.01
+gsimsub2_df = gsimsub_selstats[((gsimsub_selstats['myrdiss'] > 0.01) | (gsimsub_selstats['DA'] > 5)) &
+                               (gsimsub_selstats['years_kept'] >= 10)]
+
+#Further subset the point dataset to only keep those remaining stations
+gsimpsub2 = os.path.join(gsimresgdb, 'GSIMSstations_sub2')
+arcpy.CopyFeatures_management(gsimpsub, gsimpsub2)
+arcpy.AddField_management(gsimpsub2, field_name='ir_moprop', field_type='FLOAT')
+
+with arcpy.da.UpdateCursor(gsimpsub2, ['gsim_no', 'ir_moprop']) as cursor:
+    for row in cursor:
+        if (gsimsub2_df['gsim_no'] == row[0]).any():
+            row[1] = float(gsimsub2_df.loc[gsimsub2_df['gsim_no'] == row[0]]['ir_moprop'])
+            cursor.updateRow(row)
+        else:
+            print('Deleting {}...'.format(row[0]))
+            cursor.deleteRow()
+
+gsimpsub2join = os.path.join(gsimresgdb, 'GSIMSstations_sub2_riverjoin')
+if not arcpy.Exists(gsimpsub2join):
+    print('Join gsim stations to nearest river reach in RiverAtlas')
+    arcpy.SpatialJoin_analysis(gsimpsub2,
+                               riveratlas, gsimpsub2join, join_operation='JOIN_ONE_TO_ONE', join_type="KEEP_COMMON",
+                               match_option='CLOSEST_GEODESIC', search_radius=0.1,
+                               distance_field_name='station_river_distance')
+
+arcpy.AddField_management(gsimpsub2join, field_name='DApercdiff', field_type='FLOAT')
+arcpy.CalculateField_management(gsimpsub2join, field='DApercdiff',
+                                expression='(!area!-!UPLAND_SKM!)/!UPLAND_SKM!',
+                                expression_type='PYTHON')
+
+#Consider the following stations as candidates to be added:
+#Subset all intermittent stations and stations in basins level 06 (give average area) where we did not yet have any observations
+
+#Determine thresholds to use for full exclusion; for manual inspection; and for automatic validation
+
+#Process to snapping, manual editing and deleting
+
+#Then add all validated intermittent stations. For perennial stations randomly draw so that the total density within
+# each basin where we did not have any data is at the maximum the average density of GRDC stations
 
 
 
 
-#Spatial Join to HydroATLAS
+#For now, could keep:
+#All intermittent stations +
+#For India: same number of perennial stations
+#In Italy, take all stations
+#For Spain
+#For Belarus, take all stations
+#For China, take all stations
+#For Russia, take all stations
+#For Argentina, Peru, Bolivia, take all stations
 
 
 #------------------------------- Create grid for prediction error mapping ----------------------------------------------
