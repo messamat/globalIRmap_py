@@ -400,9 +400,9 @@ def pathcheckcreate(path, verbose=True):
             os.mkdir(path)
 
 #Concatenate csv files
-def mergedelcsv(dir, repattern=None, skiprows=None, outfile=None, returndf=False, delete=False, verbose=False):
+def mergedelcsv(dir, repattern=None, skiprows=None, outfile=None, returndf=False, delete=False, verbose=False, sep=','):
     flist = getfilelist(dir, repattern)
-    df = pd.concat([pd.read_csv(file, index_col=[0], parse_dates=[0], skiprows=skiprows)
+    df = pd.concat([pd.read_csv(file, sep=sep, index_col=[0], parse_dates=[0], skiprows=skiprows)
                     for file in flist],
                    axis=0) \
         .sort_index()
