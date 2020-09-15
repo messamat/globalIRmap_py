@@ -35,6 +35,8 @@ grdcstations = os.path.join(datdir, 'grdc_curated', 'high_qual_daily_stations.cs
 grdc_disdatdir = os.path.join(datdir, 'GRDCdat_day')
 grdcp = os.path.join(outgdb, 'grdcstations')
 grdcpjoin = os.path.join(outgdb, 'grdcstations_riverjoin')
+grdcpclean = os.path.join(outgdb, 'grdcstations_clean')
+grdcpcleanjoin = os.path.join(outgdb, 'grdcstations_cleanjoin')
 basin6grdcpjoin = os.path.join(outgdb, 'BasinATLAS_v10_lev05_GRDCstations_join')
 
 grdcp_aeqd = os.path.join(outgdb, "grdcstations_aeqd")
@@ -61,6 +63,7 @@ gsimpsub3= os.path.join(gsimresgdb, 'GSIMSstations_sub3')
 gsimpsub3join = os.path.join(gsimresgdb, 'GSIMSstations_sub3_riverjoin')
 
 grdcp_10ymin = os.path.join(gsimresgdb, 'grdcstations_10ymin')
+grdcpjoinedit = os.path.join(outgdb, 'grdcstations_riverjoinedit')
 gsimpsnap = os.path.join(gsimresgdb, 'GSIMSstations_riversnap')
 gsimpsnapedit = os.path.join(gsimresgdb, 'GSIMSstations_riversnapedit')
 
@@ -92,16 +95,27 @@ if not arcpy.Exists(grdcpjoin):
                                     expression_type='PYTHON')
 
 #Check and correct all those that are more than 50 meters OR whose |DApercdiff| > 0.10
-grdcpjoinedit = os.path.join(outgdb, 'grdcstations_riverjoinedit')
 if not arcpy.Exists(grdcpjoinedit):
     arcpy.CopyFeatures_management(grdcpjoin, grdcpjoinedit)
     arcpy.AddField_management(grdcpjoinedit, 'manualsnap_mathis', 'SHORT')
     arcpy.AddField_management(grdcpjoinedit, 'snap_comment_mathis', 'TEXT')
 
-#Delete those -1
+#Delete those that were marked with -1
+if not arcpy.Exists(grdcpclean):
+    arcpy.CopyFeatures_management(grdcpjoinedit, grdcpclean)
+    with arcpy.da.UpdateCursor(grdcpclean, ['manualsnap_mathis']) as cursor:
+        for row in cursor:
+            if row[0] == -1:
+                cursor.deleteRow()
 
-#Delete useless fields and re-spatial join
+    #Delete useless fields and re-spatial join
+    for f1 in arcpy.ListFields(grdcpclean):
+        if f1.name not in [f2.name for f2 in arcpy.ListFields(grdcp)]+['manualsnap_mathis', 'snap_comment_mathis']:
+            arcpy.DeleteField_management(grdcpclean, f1.name)
 
+arcpy.SpatialJoin_analysis(grdcpclean, riveratlas, grdcpcleanjoin, join_operation='JOIN_ONE_TO_ONE', join_type="KEEP_COMMON",
+                           match_option='CLOSEST_GEODESIC', search_radius=0.0005,
+                           distance_field_name='station_river_distance')
 
 #Export attribute table of RiverATLAS with selected
 if not arcpy.Exists(riveratlas_csv):
@@ -310,7 +324,6 @@ with arcpy.da.UpdateCursor(gsimpsnapedit, ['DApercdiff', 'station_river_distance
 #Process to snapping, manual editing and deleting
 
 #Delete those that were marked with -1
-#Delete points with -1
 gsimpsnapclean = os.path.join(gsimresgdb, 'GSIMstations_riversnapclean')
 if not arcpy.Exists(gsimpsnapclean):
     arcpy.CopyFeatures_management(gsimpsnapedit, gsimpsnapclean)
