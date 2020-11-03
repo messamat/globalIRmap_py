@@ -13,9 +13,13 @@ resdir = os.path.join(rootdir, 'results')
 #Input var
 outgdb = os.path.join(resdir, 'spatialoutputs.gdb')
 riveratlas_orig = os.path.join(datdir, 'HydroATLAS', 'RiverATLAS_v10.gdb', 'RiverATLAS_v10')
-riveratlas_predtablist = getfilelist(resdir, 'RiverATLAS_predbasic800.*[.]csv$')
-riveratlas_predtab = pd.read_csv(riveratlas_predtablist[-1])
+riveratlas_predtab_u10o10 = os.path.join(resdir, 'RiverATLAS_predbasic800_20201027_u10o10.csv')
+riveratlas_predtab_u10nodiso10 = os.path.join(resdir, 'RiverATLAS_predbasic800_20201027_u10nodiso10.csv')
+riveratlas_predtab_u10o1 = os.path.join(resdir, 'RiverATLAS_predbasic800_20201028_u10o1.csv')
+
 riveratlas = os.path.join(outgdb, 'RiverATLAS_v10pred')
+
+riveratlas_predtab = pd.read_csv(riveratlas_predtab_u10o1)
 
 # Create copy of RiverATLAS for display
 if not arcpy.Exists(riveratlas):
