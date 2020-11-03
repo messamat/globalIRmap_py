@@ -6,6 +6,7 @@ import re
 from utility_functions import *
 
 arcpy.env.overwriteOutput = True
+arcpy.CheckOutExtension('Spatial')
 
 #Directory structure
 rootdir = os.path.dirname(os.path.abspath(__file__)).split('\\src')[0]
@@ -20,8 +21,10 @@ arcpy.env.qualifiedFieldNames = 'False'
 #Input variables
 riveratlas = os.path.join(datdir, 'HydroATLAS', 'RiverATLAS_v10.gdb', 'RiverATLAS_v10')
 riveratlasv11 = os.path.join(datdir, 'HydroATLAS', 'RiverATLAS_v11.gdb', 'RiverATLAS_v11')
+hydrolakes = os.path.join(datdir, 'hydrolakes', 'HydroLAKES_polys_v10.gdb', 'HydroLAKES_polys_v10')
 basinatlasl06 = os.path.join(datdir, 'HydroATLAS', 'BasinATLAS_v10.gdb', 'BasinATLAS_v10_lev05')
 hydromask = os.path.join(datdir, 'HydroATLAS', 'Masks_20200525','hydrosheds_landmask_15s.gdb', 'hys_land_15s')
+seamaskbuf3k = os.path.join(datdir, 'GLAD', 'class99_19_rsp9_buf3k1.tif')
 
 #Output variables
 outgdb = os.path.join(resdir, 'spatialoutputs.gdb')
@@ -66,6 +69,55 @@ grdcp_10ymin = os.path.join(gsimresgdb, 'grdcstations_10ymin')
 grdcpjoinedit = os.path.join(outgdb, 'grdcstations_riverjoinedit')
 gsimpsnap = os.path.join(gsimresgdb, 'GSIMSstations_riversnap')
 gsimpsnapedit = os.path.join(gsimresgdb, 'GSIMSstations_riversnapedit')
+gsimpsnapclean = os.path.join(gsimresgdb, 'GSIMstations_riversnapclean')
+gsimpcleanjoin = os.path.join(gsimresgdb, 'GSIMstations_cleanriverjoin')
+
+########################################################################################################################
+# ---------- Flag reaches within lakes ------
+arcpy.JoinField_management(in_data=riveratlas, in_field=arcpy.Describe(riveratlas).OIDFieldName,
+                           join_table=rivlakeinters, join_field=, fields='LENGTH_lakeinters')
+
+# ---------- Flag reaches with mean annual discharge == 0 (dis_m3_pyr) AND
+# ---------- (ORD_STRA == 1 OR downstream of another reach with discharge == 0)
+if not 'NOFLOW' in [f.name for f in arcpy.ListFields(riveratlas)]:
+    arcpy.AddField_management(riveratlas, 'NOFLOW', 'SHORT')
+
+nextdownset = set()
+x = 0
+with arcpy.da.UpdateCursor(riveratlas, ['ORD_STRA', 'dis_m3_pyr', 'NOFLOW', 'NEXT_DOWN']) as cursor:
+    for row in cursor:
+        if x % 100000 == 0:
+            print(x)
+        if row[0] == 1:
+            if row[1] == 0: #If Strahler order ==1 and mean annual natural discharge == 0
+                row[2] = 1 #Set NOFLOW to 0
+                nextdownset.add(row[3]) #Add reach ID to set
+            else:
+                row[2] = 0
+        cursor.updateRow(row)
+        x += 1
+
+while len(nextdownset) > 0:
+    print('Processing {0} reaches to determine inclusion status in analysis'.format(len(nextdownset)))
+    with arcpy.da.UpdateCursor(riveratlas, ['HYRIV_ID', 'dis_m3_pyr', 'NOFLOW', 'NEXT_DOWN'],
+                               where_clause='NOFLOW IS NULL') as cursor:
+        for row in cursor:
+            if (row[0] in nextdownset):
+                if (row[1] == 0):  # If downstream of a noflow reach and mean annual natural discharge == 0
+                    row[2] = 1  # Set NOFLOW to 0
+                    nextdownset.add(row[3])  # Add reach ID to set
+                else:
+                    row[2] = 0
+                nextdownset.remove(row[0]) #Remove HYRIV_ID from nextdownset
+                cursor.updateRow(row)
+
+#Export attribute table of RiverATLAS with selected
+if not arcpy.Exists(riveratlas_csv):
+    print('Exporting CSV table of RiverATLAS v1.0 attributes')
+    arcpy.CopyRows_management(in_rows = riveratlas, out_table=riveratlas_csv)
+if not arcpy.Exists(riveratlasv11_csv):
+    print('Exporting CSV table of RiverATLAS v1.1 attributes')
+    arcpy.CopyRows_management(in_rows=riveratlasv11, out_table=riveratlasv11_csv)
 
 ######################################## FORMAT GRDC STATIONS ##########################################################
 #Create points for grdc stations
@@ -117,11 +169,12 @@ arcpy.SpatialJoin_analysis(grdcpclean, riveratlas, grdcpcleanjoin, join_operatio
                            match_option='CLOSEST_GEODESIC', search_radius=0.0005,
                            distance_field_name='station_river_distance')
 
-#Export attribute table of RiverATLAS with selected
-if not arcpy.Exists(riveratlas_csv):
-    arcpy.CopyRows_management(in_rows = riveratlas, out_table=riveratlas_csv)
-if not arcpy.Exists(riveratlasv11_csv):
-    arcpy.CopyRows_management(in_rows=riveratlasv11, out_table=riveratlasv11_csv)
+#Extract GLAD sea mask value to check for tidal reversal as cause of intermittency
+ExtractMultiValuesToPoints(in_point_features=grdcpcleanjoin, in_rasters=seamaskbuf3k,
+                           bilinear_interpolate_values='NONE')
+
+#Add coordinates
+arcpy.AddGeometryAttributes_management(grdcpcleanjoin, Geometry_Properties='POINT_X_Y_Z_M')
 
 ######################################## FORMAT GSIM STATIONS ##########################################################
 #Replace points with underscores in metadata table and import into geodatabase with correct field types
@@ -312,10 +365,10 @@ arcpy.Snap_edit(gsimpsnap, snapenv)
 #Flag those to check and edit them: beyond 200 m from HydroSHEDS reach OR DApercdiff > 5%
 arcpy.CopyFeatures_management(gsimpsnap, gsimpsnapedit)
 
-arcpy.AddField_management(gsimpsnapedit, 'manualsnap', 'SHORT')
-arcpy.AddField_management(gsimpsnapedit, 'snap_comment', 'TEXT')
+arcpy.AddField_management(gsimpsnapedit, 'manualsnap_mathis', 'SHORT')
+arcpy.AddField_management(gsimpsnapedit, 'snap_commentmathis', 'TEXT')
 
-with arcpy.da.UpdateCursor(gsimpsnapedit, ['DApercdiff', 'station_river_distance', 'manualsnap']) as cursor:
+with arcpy.da.UpdateCursor(gsimpsnapedit, ['DApercdiff', 'station_river_distance', 'manualsnap_mathis']) as cursor:
     for row in cursor:
         if (abs(row[0]) > 0.05) or (row[1] > 200):
             row[2] = 2
@@ -324,10 +377,9 @@ with arcpy.da.UpdateCursor(gsimpsnapedit, ['DApercdiff', 'station_river_distance
 #Process to snapping, manual editing and deleting
 
 #Delete those that were marked with -1
-gsimpsnapclean = os.path.join(gsimresgdb, 'GSIMstations_riversnapclean')
 if not arcpy.Exists(gsimpsnapclean):
     arcpy.CopyFeatures_management(gsimpsnapedit, gsimpsnapclean)
-    with arcpy.da.UpdateCursor(gsimpsnapclean, ['manualsnap']) as cursor:
+    with arcpy.da.UpdateCursor(gsimpsnapclean, ['manualsnap_mathis']) as cursor:
         for row in cursor:
             if row[0] == -1:
                 cursor.deleteRow()
@@ -337,14 +389,13 @@ if not arcpy.Exists(gsimpsnapclean):
     arcpy.Snap_edit(gsimpsnapclean, snapenv2)
 
     #Delete unneeded columns
-    keepcols_gsim = [f.name for f in arcpy.ListFields(gsimpsub3)] + ['manualsnap', 'DApercdiff', 'snap_comment']
+    keepcols_gsim = [f.name for f in arcpy.ListFields(gsimpsub3)] + ['manualsnap_mathis', 'DApercdiff', 'snap_commentmathis']
     for f in arcpy.ListFields(gsimpsnapclean):
         if f.name not in keepcols_gsim:
             print('Deleting {}'.format(f.name))
             arcpy.DeleteField_management(gsimpsnapclean, f.name)
 
 #Join stations to nearest river reach in RiverAtlas
-gsimpcleanjoin = os.path.join(gsimresgdb, 'GSIMstations_cleanriverjoin')
 if not arcpy.Exists(gsimpcleanjoin):
     print('Join grdc stations to nearest river reach in RiverAtlas')
     arcpy.SpatialJoin_analysis(gsimpsnapclean, riveratlas, gsimpcleanjoin,
@@ -352,6 +403,11 @@ if not arcpy.Exists(gsimpcleanjoin):
                                match_option='CLOSEST_GEODESIC', search_radius=0.0005,
                                distance_field_name='station_river_distance')
 
+#Extract GLAD sea mask value to check
+ExtractMultiValuesToPoints(in_point_features=gsimpcleanjoin, in_rasters=seamaskbuf3k,
+                           bilinear_interpolate_values='NONE')
+
+#Get coordinates
 arcpy.AddGeometryAttributes_management(gsimpcleanjoin, Geometry_Properties='POINT_X_Y_Z_M')
 
 #Maybe:
