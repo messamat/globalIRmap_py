@@ -18,12 +18,21 @@ refnetsub_us = os.path.join(resdir_us, 'refnet_o10')
 
 #France dirs
 datdir_fr = os.path.join(compdatdir, 'France')
-pathcheckcreate(datdir_fr)
-resdir_fr = os.path.join(compresdir, 'france.gdb')
-pathcheckcreate(resdir_fr)
-outnet_fr = os.path.join(resdir_fr, 'network')
-bassel_fr = os.path.join(resdir_fr, 'hydrobasins12')
-refnetsub_fr = os.path.join(resdir_fr, 'refnet_o10')
+datdir_snelder = os.path.join(datdir_fr, 'Snelder')
+pathcheckcreate(datdir_snelder)
+resdir_snelder = os.path.join(compresdir, 'france_snelder.gdb')
+pathcheckcreate(resdir_snelder)
+
+datdir_snelder = os.path.join(datdir_fr, 'Snelder')
+pathcheckcreate(datdir_snelder)
+resdir_snelder = os.path.join(compresdir, 'france_snelder.gdb')
+pathcheckcreate(resdir_snelder)
+outnet_snelder = os.path.join(resdir_snelder, 'network')
+refnetsub_snelder = os.path.join(resdir_snelder, 'refnet_o10')
+bassel_fr = os.path.join(resdir_snelder, 'hydrobasins12')
+
+
+
 
 #OndeEau dir
 datdir_onde = os.path.join(insitudatdir, 'OndeEau')
@@ -185,48 +194,83 @@ outflsubmr = os.path.join(resdir_us, "NHDPlusmr_FlowLinesub")
 if not arcpy.Exists(outflsubmr):
     arcpy.CopyFeatures_management('NHDmrlyr', outflsubmr)
 
-for ord in [[1,3], [4,5], [6,7], [8,9], [10, 11]]:
-    subriver_out = os.path.join(resdir_us,
-                                '{0}_ORD{1}_{2}'.format(os.path.split(outflsubmr)[1], ord[0], ord[1]))
-    if not arcpy.Exists(subriver_out):
-        sqlexp = 'StreamOrde >= {0} AND StreamOrde <= {1}'.format(ord[0], ord[1])
-        print(sqlexp)
-        arcpy.MakeFeatureLayer_management(outflsubmr, out_layer='subriver', where_clause=sqlexp)
-        arcpy.CopyFeatures_management('subriver', subriver_out)
-        arcpy.Delete_management('subriver')
+#Add discharge field in m3/s
+arcpy.AddField_management(outflsubmr, 'QE_MAm3', field_type='DOUBLE')
+with arcpy.da.UpdateCursor(outflsubmr, ['QE_MAm3', 'QE_MA']) as cursor:
+    for row in cursor:
+        row[0] = float(row[1]) * 0.028316847
+        cursor.updateRow(row)
 
-#-------------------- France ----------------------------------------------------------------------------------------------
+
+for dis in [[0,0.1], [0.1,1], [1,10], [10,100], [100,1000], [1000, 10000], [10000, 1000000]]:
+    subriver_out = os.path.join(resdir_us,
+                                '{0}_DIS{1}_{2}'.format(os.path.split(outflsubmr)[1],
+                                                        re.sub('[.]', '', str(dis[0])),
+                                                        re.sub('[.]', '', str(dis[1]))))
+    sqlexp = 'QE_MAm3 >= {0} AND QE_MAm3 <= {1}'.format(dis[0], dis[1])
+    print(sqlexp)
+    arcpy.MakeFeatureLayer_management(outflsubmr, out_layer='subriver', where_clause=sqlexp)
+    arcpy.CopyFeatures_management('subriver', subriver_out)
+    arcpy.Delete_management('subriver')
+
+#-------------------- France - SNELDER ----------------------------------------------------------------------------------------------
 #Data are personal communications from Snelder et al. 2013
 
 #Join original French river network data with Snelder et al.' predictions
-arcpy.MakeFeatureLayer_management(os.path.join(datdir_fr, 'rhtvs2_all_phi_qclass.shp'),
+arcpy.MakeFeatureLayer_management(os.path.join(datdir_snelder, 'rhtvs2_all_phi_qclass.shp'),
                                   out_layer='frlyr')
 arcpy.AddJoin_management(in_layer_or_view='frlyr', in_field='ID_DRAIN',
-                         join_table=os.path.join(datdir_fr, 'INT_RF.txt'), join_field='AllPred$ID_DRAIN')
-arcpy.CopyFeatures_management(in_features='frlyr', out_feature_class=outnet_fr)
+                         join_table=os.path.join(datdir_snelder, 'INT_RF.txt'), join_field='AllPred$ID_DRAIN')
+arcpy.CopyFeatures_management(in_features='frlyr', out_feature_class=outnet_snelder)
 
-arcpy.DefineProjection_management(in_dataset=outnet_fr, coor_system=arcpy.SpatialReference(2192)) #ED_1950_France_EuroLambert
+arcpy.DefineProjection_management(in_dataset=outnet_snelder, coor_system=arcpy.SpatialReference(2192)) #ED_1950_France_EuroLambert
 
 #Subsetlect all segments with drainage area > 10 km2
-arcpy.MakeFeatureLayer_management(outnet_fr,
+arcpy.MakeFeatureLayer_management(outnet_snelder,
                                   out_layer='frlyr', where_clause='rhtvs2_all_phi_qclass_SURF_BV >= 10')
-arcpy.CopyFeatures_management(in_features='frlyr', out_feature_class=refnetsub_fr)
+arcpy.CopyFeatures_management(in_features='frlyr', out_feature_class=refnetsub_snelder)
 
 #Divide french network by river order
 for ord in [[1,3], [4,5], [6,7], [8,9]]:
-    subriver_out = os.path.join(resdir_fr,
-                                '{0}_ORD{1}_{2}'.format(os.path.split(refnetsub_fr)[1], ord[0], ord[1]))
+    subriver_out = os.path.join(resdir_snelder,
+                                '{0}_ORD{1}_{2}'.format(os.path.split(refnetsub_snelder)[1], ord[0], ord[1]))
     sqlexp = 'rhtvs2_all_phi_qclass_STRAHLER >= {0} AND rhtvs2_all_phi_qclass_STRAHLER <= {1}'.format(ord[0], ord[1])
     print(sqlexp)
-    arcpy.MakeFeatureLayer_management(refnetsub_fr, out_layer='subriver', where_clause=sqlexp)
+    arcpy.MakeFeatureLayer_management(refnetsub_snelder, out_layer='subriver', where_clause=sqlexp)
+    arcpy.CopyFeatures_management('subriver', subriver_out)
+    arcpy.Delete_management('subriver')
+
+for dis in [[0,0.1], [0.1,1], [1,10], [10,100], [100,1000], [1000, 10000]]:
+    subriver_out = os.path.join(resdir_snelder,
+                                '{0}_DIS{1}_{2}'.format(os.path.split(refnetsub_snelder)[1],
+                                                        re.sub('[.]', '', str(dis[0])),
+                                                        re.sub('[.]', '', str(dis[1]))))
+    sqlexp = 'rhtvs2_all_phi_qclass_MODULE >= {0} AND rhtvs2_all_phi_qclass_MODULE <= {1}'.format(dis[0], dis[1])
+    print(sqlexp)
+    arcpy.MakeFeatureLayer_management(refnetsub_snelder, out_layer='subriver', where_clause=sqlexp)
     arcpy.CopyFeatures_management('subriver', subriver_out)
     arcpy.Delete_management('subriver')
 
 #Create a subselection of HydroSHEDS river sections that overlap with the French dataset
 arcpy.MakeFeatureLayer_management(hydrobasin12, 'hydrofr')
-arcpy.SelectLayerByLocation_management('hydrofr', overlap_type='CONTAINS', select_features=outnet_fr,
+arcpy.SelectLayerByLocation_management('hydrofr', overlap_type='CONTAINS', select_features=outnet_snelder,
                                        selection_type='NEW_SELECTION')
-arcpy.CopyFeatures_management('hydrofr', bassel_fr)
+arcpy.CopyFeatures_management('hydrofr', bassel_snelder)
+
+
+#-------------------- France - BD Topage® ----------------------------------------------------------------------------------------------
+#Download NHDplus data
+# bdtopage_url = http://services.sandre.eaufrance.fr/telechargement/geo/ETH/BDTopage/2019/BD_Topage_FXX_2019.zip
+# bdtopo_url = ftp://BDTOPO_V3_ext:Aish3ho8!!!@ftp3.ign.fr/BDTOPO_3-0_2020-09-15/BDTOPO_3-0_HYDROGRAPHIE_SHP_LAMB93_FXX_2020-09-15.7z
+# dlfile(url=url, outpath=os.path.join(datdir_us, "NHDPlus_hr"), ignore_downloadable=True)
+
+#http://www.sandre.eaufrance.fr/?urn=urn:sandre:donnees:773::::::referentiel:3.1:html
+datdir_bdtopage = os.path.join(datdir_fr, 'bdtopage')
+innet_bdtopage = os.path.join(datdir_bdtopage, 'TronconHydrographique_FXX.shp')
+datdir_bdtopage
+
+D:\PhD\HydroATLAS\data\Comparison_databases\France\bdtopage\
+
 
 #-------------------- Brazil ----------------------------------------------------------------------------------------------
 #ftp://geoftp.ibge.gov.br/cartas_e_mapas/bases_cartograficas_continuas/bcim/versao2016/shapefile/
