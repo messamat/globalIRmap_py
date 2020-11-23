@@ -4,6 +4,7 @@ Download national river networks, model outputs, and on-the-ground observation o
 
 from setup_localIRformatting import *
 import math
+arcpy.CheckOutExtension('Network')
 
 #US dirs
 datdir_us = os.path.join(compdatdir, 'US')
@@ -14,7 +15,7 @@ pathcheckcreate(resdir_us)
 inbas_us = os.path.join(datdir_us, 'WBD_National_GDB.gdb', 'WBD', 'WBDHU8')
 outnet_us = os.path.join(resdir_us, 'network')
 bassel_us = os.path.join(resdir_us, 'hydrobasins12')
-refnetsub_us = os.path.join(resdir_us, 'refnet_o10')
+netrefsub_us = os.path.join(resdir_us, 'netref_o10')
 
 #France dirs
 datdir_fr = os.path.join(compdatdir, 'France')
@@ -28,11 +29,20 @@ pathcheckcreate(datdir_snelder)
 resdir_snelder = os.path.join(compresdir, 'france_snelder.gdb')
 pathcheckcreate(resdir_snelder)
 outnet_snelder = os.path.join(resdir_snelder, 'network')
-refnetsub_snelder = os.path.join(resdir_snelder, 'refnet_o10')
+netrefsub_snelder = os.path.join(resdir_snelder, 'netref_o10')
 bassel_fr = os.path.join(resdir_snelder, 'hydrobasins12')
 
+#Brazil dirs
+datdir_bz = os.path.join(compdatdir, 'Brazil')
+resdir_bz= os.path.join(compresdir, 'brazil.gdb')
+pathcheckcreate(datdir_bz)
+pathcheckcreate(resdir_bz)
 
-
+#Australia
+datdir_au = os.path.join(compdatdir, 'Australia')
+resdir_au= os.path.join(compresdir, 'australia.gdb')
+pathcheckcreate(datdir_au)
+pathcheckcreate(resdir_au)
 
 #OndeEau dir
 datdir_onde = os.path.join(insitudatdir, 'OndeEau')
@@ -160,16 +170,16 @@ usnhd_df.columns = ['FCode', 'LengthKM', 'ReachCode', 'StreamOrde', 'TotDASqKm',
 usnhd_df.to_csv(os.path.join(datdir_us, 'NHDhr_attris.csv'))
 
 #Subsetlect all NHD segments with TotDASqKm > 10km2 and merge them to visually assess predictions
-arcpy.Merge_management(inputs=flsubl, output=refnetsub_us)
+arcpy.Merge_management(inputs=flsubl, output=netrefsub_us)
 
 #Divide by river order
 for ord in [[1,3], [4,5], [6,7], [8,9], [10, 11]]:
     subriver_out = os.path.join(resdir_us,
-                                '{0}_ORD{1}_{2}'.format(os.path.split(refnetsub_us)[1], ord[0], ord[1]))
+                                '{0}_ORD{1}_{2}'.format(os.path.split(netrefsub_us)[1], ord[0], ord[1]))
     if not arcpy.Exists(subriver_out):
         sqlexp = 'StreamOrde >= {0} AND StreamOrde <= {1}'.format(ord[0], ord[1])
         print(sqlexp)
-        arcpy.MakeFeatureLayer_management(refnetsub_us, out_layer='subriver', where_clause=sqlexp)
+        arcpy.MakeFeatureLayer_management(netrefsub_us, out_layer='subriver', where_clause=sqlexp)
         arcpy.CopyFeatures_management('subriver', subriver_out)
         arcpy.Delete_management('subriver')
 
@@ -228,26 +238,26 @@ arcpy.DefineProjection_management(in_dataset=outnet_snelder, coor_system=arcpy.S
 #Subsetlect all segments with drainage area > 10 km2
 arcpy.MakeFeatureLayer_management(outnet_snelder,
                                   out_layer='frlyr', where_clause='rhtvs2_all_phi_qclass_SURF_BV >= 10')
-arcpy.CopyFeatures_management(in_features='frlyr', out_feature_class=refnetsub_snelder)
+arcpy.CopyFeatures_management(in_features='frlyr', out_feature_class=netrefsub_snelder)
 
 #Divide french network by river order
 for ord in [[1,3], [4,5], [6,7], [8,9]]:
     subriver_out = os.path.join(resdir_snelder,
-                                '{0}_ORD{1}_{2}'.format(os.path.split(refnetsub_snelder)[1], ord[0], ord[1]))
+                                '{0}_ORD{1}_{2}'.format(os.path.split(netrefsub_snelder)[1], ord[0], ord[1]))
     sqlexp = 'rhtvs2_all_phi_qclass_STRAHLER >= {0} AND rhtvs2_all_phi_qclass_STRAHLER <= {1}'.format(ord[0], ord[1])
     print(sqlexp)
-    arcpy.MakeFeatureLayer_management(refnetsub_snelder, out_layer='subriver', where_clause=sqlexp)
+    arcpy.MakeFeatureLayer_management(netrefsub_snelder, out_layer='subriver', where_clause=sqlexp)
     arcpy.CopyFeatures_management('subriver', subriver_out)
     arcpy.Delete_management('subriver')
 
 for dis in [[0,0.1], [0.1,1], [1,10], [10,100], [100,1000], [1000, 10000]]:
     subriver_out = os.path.join(resdir_snelder,
-                                '{0}_DIS{1}_{2}'.format(os.path.split(refnetsub_snelder)[1],
+                                '{0}_DIS{1}_{2}'.format(os.path.split(netrefsub_snelder)[1],
                                                         re.sub('[.]', '', str(dis[0])),
                                                         re.sub('[.]', '', str(dis[1]))))
     sqlexp = 'rhtvs2_all_phi_qclass_MODULE >= {0} AND rhtvs2_all_phi_qclass_MODULE <= {1}'.format(dis[0], dis[1])
     print(sqlexp)
-    arcpy.MakeFeatureLayer_management(refnetsub_snelder, out_layer='subriver', where_clause=sqlexp)
+    arcpy.MakeFeatureLayer_management(netrefsub_snelder, out_layer='subriver', where_clause=sqlexp)
     arcpy.CopyFeatures_management('subriver', subriver_out)
     arcpy.Delete_management('subriver')
 
@@ -258,20 +268,6 @@ arcpy.SelectLayerByLocation_management('hydrofr', overlap_type='CONTAINS', selec
 arcpy.CopyFeatures_management('hydrofr', bassel_snelder)
 
 
-#-------------------- France - BD Topage® ----------------------------------------------------------------------------------------------
-#Download NHDplus data
-# bdtopage_url = http://services.sandre.eaufrance.fr/telechargement/geo/ETH/BDTopage/2019/BD_Topage_FXX_2019.zip
-# bdtopo_url = ftp://BDTOPO_V3_ext:Aish3ho8!!!@ftp3.ign.fr/BDTOPO_3-0_2020-09-15/BDTOPO_3-0_HYDROGRAPHIE_SHP_LAMB93_FXX_2020-09-15.7z
-# dlfile(url=url, outpath=os.path.join(datdir_us, "NHDPlus_hr"), ignore_downloadable=True)
-
-#http://www.sandre.eaufrance.fr/?urn=urn:sandre:donnees:773::::::referentiel:3.1:html
-datdir_bdtopage = os.path.join(datdir_fr, 'bdtopage')
-innet_bdtopage = os.path.join(datdir_bdtopage, 'TronconHydrographique_FXX.shp')
-datdir_bdtopage
-
-D:\PhD\HydroATLAS\data\Comparison_databases\France\bdtopage\
-
-
 #-------------------- Brazil ----------------------------------------------------------------------------------------------
 #ftp://geoftp.ibge.gov.br/cartas_e_mapas/bases_cartograficas_continuas/bcim/versao2016/shapefile/
 #ftp://geoftp.ibge.gov.br/cartas_e_mapas/bases_cartograficas_continuas/bcim/versao2016/informacoes_tecnicas/
@@ -279,6 +275,85 @@ D:\PhD\HydroATLAS\data\Comparison_databases\France\bdtopage\
 "ftp://geoftp.ibge.gov.br/cartas_e_mapas/mapa_indice_digital_4ed/produto_mapa_indice_digital/" #For topographic map footprints
 #Select streams based on IMPRESSA_250000 in Shap
 
+#Download and unzip database
+url_bz = "ftp://geoftp.ibge.gov.br/cartas_e_mapas/bases_cartograficas_continuas/bcim/versao2016/shapefile/bcim_2016_shapefiles_21-11-2018.zip"
+outzip_bz = os.path.join(datdir_bz, 'bcim_2016_shapefiles_21-11-2018.zip')
+if not arcpy.Exists(outzip_bz ):
+    print(url_bz)
+    dlfile(url=url_bz, outpath=outzip_bz, ignore_downloadable=True)
+    unzip(outzip_bz)
+
+netref_bz = os.path.join(datdir_bz, 'hid_trecho_drenagem_l.shp')
+netproj_bz = os.path.join(resdir_bz, 'netrawproj')
+danglep_bz = os.path.join(resdir_bz, 'danglep')
+netmain_bz = os.path.join(resdir_bz, 'netmain')
+netdangle_bz = os.path.join(resdir_bz, 'netdangle')
+
+#Unfortunately, network is poorly formatted. Lines are not digitized in correct direction and there are scores
+#of topological issues (many lines that should be connected are > 100 m apart)
+arcpy.Project_management(netref_bz, netproj_bz, out_coor_system='5880')
+arcpy.FeatureVerticesToPoints_management(netproj_bz, danglep_bz, point_location='DANGLE')
+danglelist = {row[0] for row in arcpy.da.UpdateCursor(danglep_bz, ['ORIG_FID'])}
+danglef = 'dangle'
+if danglef not in [f.name for f in arcpy.ListFields(netproj_bz)]:
+    arcpy.AddField_management(netproj_bz, danglef, field_type='SHORT')
+
+with arcpy.da.UpdateCursor(netproj_bz, ['OBJECTID', danglef]) as cursor:
+    for row in cursor:
+        if row[0] in danglelist:
+            if row[1] is None:
+                row[1] = 1
+            elif row[1] > 0:
+                row[1] += 1
+            cursor.updateRow(row)
+
+arcpy.MakeFeatureLayer_management(netproj_bz, out_layer='subriver',
+                                  where_clause='dangle IS NULL')
+arcpy.CopyFeatures_management('subriver', netmain_bz)
+
+arcpy.MakeFeatureLayer_management(netproj_bz, out_layer='subriver',
+                                  where_clause='dangle = 1')
+arcpy.CopyFeatures_management('subriver', netdangle_bz)
+#Also cheked 1:250K dataset and provides nothing more
+#https://geoftp.ibge.gov.br/cartas_e_mapas/bases_cartograficas_continuas/bc250/versao2019/geopackage/
+
+#-------------------- Australia -----------------------------------
+ftp://ftp.bom.gov.au/anon/home/geofabric/
+Geofabric_Metadata_GDB_V3_2.zip
+Geofabric_National_V3_2_PRODUCT_README.txt
+Geofabric_National_V3_2_PRODUCT_README.txt
+
+
+netref_au = os.path.join(datdir_au, 'SH_Network_GDB' ,'SH_Network.gdb', 'AHGFNetworkStream')
+arcpy.Describe(netref_au).SpatialReference.name
+[f.name for f in arcpy.ListFields(netref_au)]
+
+#Export by drainage area size class (in m2)
+for da in [[10, 100], [100, 1000], [10**3,10**4], [10**4,10**5], [10**5,10**6]]: #km2
+    subriver_out = os.path.join(resdir_au,
+                                '{0}_DA{1}_{2}'.format(os.path.split(netref_au)[1],
+                                                        re.sub('[.]', '', str(da[0])),
+                                                        re.sub('[.]', '', str(da[1]))))
+    sqlexp = 'UpstrDArea >= {0} AND UpstrDArea <= {1}'.format(da[0]*10**6, da[1]*10**6) #Convert to m3
+    print(sqlexp)
+    arcpy.MakeFeatureLayer_management(netref_au, out_layer='subriver', where_clause=sqlexp)
+    arcpy.CopyFeatures_management('subriver', subriver_out)
+    arcpy.Delete_management('subriver')
+
+
+
+#-------------------- France - BD Topage® ----------------------------------------------------------------------------------------------
+# bdtopage_url = http://services.sandre.eaufrance.fr/telechargement/geo/ETH/BDTopage/2019/BD_Topage_FXX_2019.zip
+# bdtopo_url = ftp://BDTOPO_V3_ext:Aish3ho8!!!@ftp3.ign.fr/BDTOPO_3-0_2020-09-15/BDTOPO_3-0_HYDROGRAPHIE_SHP_LAMB93_FXX_2020-09-15.7z
+# dlfile(url=url, outpath=os.path.join(datdir_us, "NHDPlus_hr"), ignore_downloadable=True)
+
+#http://www.sandre.eaufrance.fr/?urn=urn:sandre:donnees:773::::::referentiel:3.1:html
+#datdir_bdtopage = os.path.join(datdir_fr, 'bdtopage')
+#innet_bdtopage = os.path.join(datdir_bdtopage, 'TronconHydrographique_FXX.shp')
+#No network information. Would have to computer river orders
+
+
+#-----------------------------------------------------------------------------------------------------------------------
 #Argentina
 "https://www.ign.gob.ar/NuestrasActividades/InformacionGeoespacial/CapasSIG"
 
