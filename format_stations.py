@@ -34,6 +34,7 @@ if not arcpy.Exists(outgdb):
 riveratlas_csv = os.path.join(resdir, 'RiverATLAS_v10tab.csv')
 riveratlasv11_csv = os.path.join(resdir, 'RiverATLAS_v11tab.csv')
 riveratlas_b03 = os.path.join(outgdb, 'RiverATLASbas3join')
+riveratlas_b05 = os.path.join(outgdb, 'RiverATLASbas5join')
 
 #grdc stations
 grdcstations = os.path.join(datdir, 'grdc_curated', 'high_qual_daily_stations.csv')
@@ -42,7 +43,7 @@ grdcp = os.path.join(outgdb, 'grdcstations')
 grdcpjoin = os.path.join(outgdb, 'grdcstations_riverjoin')
 grdcpclean = os.path.join(outgdb, 'grdcstations_clean')
 grdcpcleanjoin = os.path.join(outgdb, 'grdcstations_cleanjoin')
-basin6grdcpjoin = os.path.join(outgdb, 'BasinATLAS_v10_lev05_GRDCstations_join')
+basin5grdcpjoin = os.path.join(outgdb, 'BasinATLAS_v10_lev05_GRDCstations_join')
 
 grdcp_aeqd = os.path.join(outgdb, "grdcstations_aeqd")
 grdcbuf = os.path.join(outgdb, 'grdcstations_buf50k')
@@ -139,13 +140,13 @@ if not arcpy.Exists(riveratlasv11_csv):
     arcpy.CopyRows_management(in_rows=riveratlasv11, out_table=riveratlasv11_csv)
 
 
-# ---------- Associate reaches with HydroBASIN level 03 ------
-arcpy.SpatialJoin_analysis(target_features=riveratlas, join_features=basinatlasl03,
-                           out_feature_class=riveratlas_b03, join_operation="JOIN_ONE_TO_ONE",
+# ---------- Associate reaches with HydroBASIN level 05 ------
+arcpy.SpatialJoin_analysis(target_features=riveratlas, join_features=basinatlasl05,
+                           out_feature_class=riveratlas_b05, join_operation="JOIN_ONE_TO_ONE",
                            join_type = 'KEEP_ALL', match_option="HAVE_THEIR_CENTER_IN")
-basdict = {row[0]:row[1] for row in arcpy.da.SearchCursor(riveratlas_b03, ['HYRIV_ID', 'HYBAS_ID'])}
-arcpy.AddField_management(riveratlas, field_name='HYBAS_ID03', field_type='DOUBLE')
-with arcpy.da.UpdateCursor(riveratlas, ['HYRIV_ID', 'HYBAS_ID03']) as cursor:
+basdict = {row[0]:row[1] for row in arcpy.da.SearchCursor(riveratlas_b05, ['HYRIV_ID', 'PFAF_ID'])}
+arcpy.AddField_management(riveratlas, field_name='PFAF_ID05', field_type='LONG')
+with arcpy.da.UpdateCursor(riveratlas, ['HYRIV_ID', 'PFAF_ID05']) as cursor:
     for row in cursor:
         row[1] = basdict[row[0]]
         cursor.updateRow(row)
@@ -428,7 +429,7 @@ if not arcpy.Exists(gsimpsnapclean):
 
 #Join stations to nearest river reach in RiverAtlas
 if not arcpy.Exists(gsimpcleanjoin):
-    print('Join grdc stations to nearest river reach in RiverAtlas')
+    print('Join gsim stations to nearest river reach in RiverAtlas')
     arcpy.SpatialJoin_analysis(gsimpsnapclean, riveratlas, gsimpcleanjoin,
                                join_operation='JOIN_ONE_TO_ONE', join_type="KEEP_COMMON",
                                match_option='CLOSEST_GEODESIC', search_radius=0.0005,
