@@ -43,6 +43,8 @@ datdir_au = os.path.join(compdatdir, 'Australia')
 resdir_au= os.path.join(compresdir, 'australia.gdb')
 pathcheckcreate(datdir_au)
 pathcheckcreate(resdir_au)
+netref_au = os.path.join(datdir_au, 'SH_Network_GDB' ,'SH_Network.gdb', 'AHGFNetworkStream')
+netproj_au = os.path.join(resdir_au, 'AHGFNetworkStream_WGS84')
 
 #OndeEau dir
 datdir_onde = os.path.join(insitudatdir, 'OndeEau')
@@ -318,13 +320,15 @@ arcpy.CopyFeatures_management('subriver', netdangle_bz)
 #https://geoftp.ibge.gov.br/cartas_e_mapas/bases_cartograficas_continuas/bc250/versao2019/geopackage/
 
 #-------------------- Australia -----------------------------------
-ftp://ftp.bom.gov.au/anon/home/geofabric/
-Geofabric_Metadata_GDB_V3_2.zip
-Geofabric_National_V3_2_PRODUCT_README.txt
-Geofabric_National_V3_2_PRODUCT_README.txt
+#Download and unzip database
+url_au = "ftp://ftp.bom.gov.au/anon/home/geofabric/Geofabric_Metadata_GDB_V3_2.zip"
+outzip_au = os.path.join(datdir_au, 'fabric_Metadata_GDB_V3_2.zip')
+if not arcpy.Exists(outzip_au):
+    print(url_au)
+    dlfile(url=url_au, outpath=outzip_au, ignore_downloadable=True)
+    unzip(outzip_au)
 
-
-netref_au = os.path.join(datdir_au, 'SH_Network_GDB' ,'SH_Network.gdb', 'AHGFNetworkStream')
+#Geofabric_National_V3_2_PRODUCT_README.txt
 arcpy.Describe(netref_au).SpatialReference.name
 [f.name for f in arcpy.ListFields(netref_au)]
 
@@ -340,6 +344,16 @@ for da in [[10, 100], [100, 1000], [10**3,10**4], [10**4,10**5], [10**5,10**6]]:
     arcpy.CopyFeatures_management('subriver', subriver_out)
     arcpy.Delete_management('subriver')
 
+arcpy.CopyFeatures_management(netref_au, os.path.join(resdir_au, os.path.split(netref_au)[1]))
+
+#Select HyoSHEDS basins intersecting with Australian dataset
+arcpy.Project_management( os.path.join(resdir_au, os.path.split(netref_au)[1]),
+                          netproj_au, out_coor_system=hydrobasin12)
+netbasinters_au = os.path.join(resdir_au, 'net_hydrobasins12')
+arcpy.Intersect_analysis([netproj_au, hydrobasin12], out_feature_class=netbasinters_au, join_attributes='ALL')
+arcpy.AddGeometryAttributes_management(netbasinters_au, Geometry_Properties='LENGTH_GEODESIC',
+                                       Length_Unit='Kilometers')
+arcpy.CopyRows_management(netbasinters_au, os.path.join(resdir, 'netbas12_inters_australia.csv'))
 
 
 #-------------------- France - BD Topage® ----------------------------------------------------------------------------------------------

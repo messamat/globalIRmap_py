@@ -80,7 +80,7 @@ arcpy.Project_management(os.path.join(resdir_pnw, 'obspoly'),
                          os.path.join(resdir_pnw, 'obspolyproj'),
                          riveratlas)
 
-#Select all RiverATLAS reaches within  50 kilometers from extent
+#Select all RiverATLAS reaches within 50 kilometers from extent
 arcpy.MakeFeatureLayer_management(riveratlas, 'atlaslyr')
 arcpy.SelectLayerByLocation_management(in_layer='atlaslyr', #First select all RiverAtlas reaches intersecting the extent of the observations
                                        overlap_type="INTERSECT",

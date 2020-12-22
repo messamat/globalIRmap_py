@@ -131,15 +131,6 @@ while len(nextdownset) > 0:
                 nextdownset.remove(row[0]) #Remove HYRIV_ID from nextdownset
                 cursor.updateRow(row)
 
-#Export attribute table of RiverATLAS with selected
-if not arcpy.Exists(riveratlas_csv):
-    print('Exporting CSV table of RiverATLAS v1.0 attributes')
-    arcpy.CopyRows_management(in_rows = riveratlas, out_table=riveratlas_csv)
-if not arcpy.Exists(riveratlasv11_csv):
-    print('Exporting CSV table of RiverATLAS v1.1 attributes')
-    arcpy.CopyRows_management(in_rows=riveratlasv11, out_table=riveratlasv11_csv)
-
-
 # ---------- Associate reaches with HydroBASIN level 05 ------
 arcpy.SpatialJoin_analysis(target_features=riveratlas, join_features=basinatlasl05,
                            out_feature_class=riveratlas_b05, join_operation="JOIN_ONE_TO_ONE",
@@ -150,6 +141,17 @@ with arcpy.da.UpdateCursor(riveratlas, ['HYRIV_ID', 'PFAF_ID05']) as cursor:
     for row in cursor:
         row[1] = basdict[row[0]]
         cursor.updateRow(row)
+
+# ---------- Compute coordinates ------
+arcpy.AddGeometryAttributes_management(riveratlas, 'LINE_START_MID_END')
+
+# ---------- Export attribute table of RiverATLAS with selected ------------------
+if not arcpy.Exists(riveratlas_csv):
+    print('Exporting CSV table of RiverATLAS v1.0 attributes')
+    arcpy.CopyRows_management(in_rows = riveratlas, out_table=riveratlas_csv)
+if not arcpy.Exists(riveratlasv11_csv):
+    print('Exporting CSV table of RiverATLAS v1.1 attributes')
+    arcpy.CopyRows_management(in_rows=riveratlasv11, out_table=riveratlasv11_csv)
 
 ######################################## FORMAT GRDC STATIONS ##########################################################
 #Create points for grdc stations

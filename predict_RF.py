@@ -4,6 +4,7 @@ import pandas as pd
 from utility_functions import *
 
 arcpy.env.overwriteOutput= True
+arcpy.env.qualifiedFieldNames = 'False'
 
 # Directory structure
 rootdir = os.path.dirname(os.path.abspath(__file__)).split('\\src')[0]
@@ -17,7 +18,16 @@ riveratlas_predtablist = getfilelist(resdir, 'RiverATLAS_predbasic800_[0-9]{8}[.
 riveratlas_predtab = pd.read_csv(riveratlas_predtablist[-1])
 riveratlas_predtabmdur30list = getfilelist(resdir, 'RiverATLAS_predbasic800_mdur30_[0-9]{8}[.]csv$')
 riveratlas_predtabmdur30 = pd.read_csv(riveratlas_predtabmdur30list[-1])
+
+insitu_resdir = os.path.join(resdir, 'Insitu_databases')
+ondeobs_ipr = getfilelist(insitu_resdir, 'ondeobs_IPR_predbasic800cat[0-9]+[.]shp$')[-1]
+pnwobs_ipr = getfilelist(insitu_resdir, 'pnwobs_IPR_predbasic800cat[0-9]+[.]shp$')[-1]
+
+#Output vars
 riveratlas = os.path.join(outgdb, 'RiverATLAS_v10pred')
+ondeobs_ipr_netjoin = os.path.join(insitu_resdir, 'ondeobs_IPRnetjoin.shp')
+pnwobs_ipr_netjoin = os.path.join(insitu_resdir, 'pnwobs_IPRnetjoin.shp')
+
 
 # Create copy of RiverATLAS for display
 if not arcpy.Exists(riveratlas):
@@ -83,3 +93,22 @@ for da in [[0, 10], [10, 100], [100, 1000], [10**3,10**4], [10**4,10**5], [10**5
     arcpy.MakeFeatureLayer_management(riveratlas, out_layer='subriver', where_clause=sqlexp)
     arcpy.CopyFeatures_management('subriver', subriver_out)
     arcpy.Delete_management('subriver')
+
+
+#Join ONDE observations + preds to network
+print('Joinin {} to network'.format(ondeobs_ipr))
+arcpy.MakeFeatureLayer_management(riveratlas, 'riveratlaslyr')
+arcpy.AddJoin_management('riveratlaslyr', in_field='HYRIV_ID',
+                         join_table=ondeobs_ipr, join_field = 'HYRIVID',
+                         join_type='KEEP_COMMON')
+arcpy.CopyFeatures_management('riveratlaslyr', out_feature_class=ondeobs_ipr_netjoin)
+arcpy.Delete_management('riveratlaslyr')
+
+#Join PNW observations + preds to network
+print('Joinin {} to network'.format(pnwobs_ipr))
+arcpy.MakeFeatureLayer_management(riveratlas, 'riveratlaslyr')
+arcpy.AddJoin_management('riveratlaslyr', in_field='HYRIV_ID',
+                         join_table=pnwobs_ipr, join_field = 'HYRIV_I',
+                         join_type='KEEP_COMMON')
+arcpy.CopyFeatures_management('riveratlaslyr', out_feature_class=pnwobs_ipr_netjoin)
+arcpy.Delete_management('riveratlaslyr')
