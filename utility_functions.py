@@ -40,6 +40,15 @@ rootdir = os.path.dirname(os.path.abspath(__file__)).split('\\src')[0]
 datdir = os.path.join(rootdir, 'data')
 resdir = os.path.join(rootdir, 'results')
 
+#Create summary of field names and types
+def metafield(in_features, outab):
+    fdict = OrderedDict()
+    for f in arcpy.ListFields(in_features):
+        fdict[f.name] = f.type
+    fdf = pd.DataFrame.from_dict(fdict, orient='index').reset_index()
+    fdf.columns = ['fname', 'ftype']
+    pd.DataFrame.to_csv(fdf, outab)
+
 #Identify duplicated feature shapes (in 'dupligroup' field) and create a non-duplicated layer if deletedupli=True
 def group_duplishape(in_features, deletedupli=False, out_featuresnodupli=None):
     arcpy.AddField_management(in_features, 'dupligroup', 'SHORT')
