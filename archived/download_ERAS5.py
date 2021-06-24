@@ -49,7 +49,7 @@ if __name__ == '__main__':
     #Make sure that API key is accessible to Copernicus API module
     cdsapi_idfile = os.path.join(os.path.expanduser("~"), ".cdsapirc")
     if not os.path.exists(cdsapi_idfile):
-        with open("configs.json") as json_data_file:  # https://martin-thoma.com/configuration-files-in-python/
+        with open("../configs.json") as json_data_file:  # https://martin-thoma.com/configuration-files-in-python/
             authdat = json.load(json_data_file)
 
         with open(cdsapi_idfile, 'w') as out_file:

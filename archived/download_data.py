@@ -1,3 +1,11 @@
+"""Developer: Mathis L. Messager
+Purpose: Download data to update and enhance RiverATLAS hydro-environmental attributes, including:
+   - SoilGrids250m v2
+   - MODIS 250 m land and water mask
+   - Global Land Analysis & Discovery (GLAD) global inland water dynamics data
+   - ALOS digital elevation model (DEM) data
+"""
+
 #pip install gsutil --ignore-installed six
 
 import os
@@ -57,7 +65,7 @@ if lyrk not in ["TAXNWRB", "TAXOUSDA"]:
         print(lyrurl)
         #dlfile(url=lyrurl, outpath=outdir, outfile=os.path.split(lyrurl)[1], fieldnames=None)
 
-#------------------------------- Download MODIS 250 m land and water mask to enhance SoilGrids -------------------------
+#------------------------------- Download MODIS 250 m land and water mask  -------------------------
 # Create output directory
 mod44w_outdir = os.path.join(datdir, 'mod44w')
 pathcheckcreate(mod44w_outdir)
@@ -71,7 +79,7 @@ mod44w_r = urllib2.urlopen(mod44w_https)
 mod44w_soup = BeautifulSoup(mod44w_r, features="html.parser")
 
 # The user credentials that will be used to authenticate access to the data
-with open("configs.json") as json_data_file:  # https://martin-thoma.com/configuration-files-in-python/
+with open("../configs.json") as json_data_file:  # https://martin-thoma.com/configuration-files-in-python/
     authdat = json.load(json_data_file)
 
 # Download all layers of interest
@@ -104,7 +112,7 @@ alos_outdir = os.path.join(datdir, 'ALOS')
 pathcheckcreate(alos_outdir)
 
 # Import user credentials that will be used to authenticate access to the data
-with open("configs.json") as json_data_file:  # https://martin-thoma.com/configuration-files-in-python/
+with open("../configs.json") as json_data_file:  # https://martin-thoma.com/configuration-files-in-python/
     authdat = json.load(json_data_file)
 
 #Source Javascript to get data on tile click: https://www.eorc.jaxa.jp/ALOS/en/aw3d30/data/html_v2003/js/dsm_dl_select_v2003.js?ver=20200330

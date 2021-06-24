@@ -1,3 +1,10 @@
+"""Developer: Mathis Messager
+Purpose:
+ - defines folder structure for formatting data to compare modeled estimates of global flow intermittence to national
+   hydrographic datasets (Comparison_databases) and to in-situ/field-based observations of flow intermittence.
+ - defines functions used in formatting data for the comparisons
+"""
+
 from utility_functions import *
 
 rootdir = 'D://PhD//HydroATLAS'

@@ -1,11 +1,8 @@
-import os
-import arcpy
-from arcpy.sa import *
-import sys
-import re
+"""Developer: Mathis L. Messager
+Purpose: Pre-process HydroSHEDS and MODIS 250m water mask for later use
+"""
+
 from utility_functions import *
-import numpy as np
-import cProfile
 
 arcpy.CheckOutExtension('Spatial')
 arcpy.env.overwriteOutput = True
@@ -91,10 +88,6 @@ baslist = getfilelist(hydrodir, 'hybas_.*[.]shp$', gdbf=False, nongdbf=True)
 hydrobas_dict = {cont: getfilelist(hydrodir, 'hybas_{}.*[.]shp$'.format(cont), gdbf=False, nongdbf=True)
                  for cont in {re.search('(?<=hybas_)[a-z]{2}', os.path.split(f)[1]).group() for f in baslist}}
 
-#Rasterize basins with
-
-
-
 #----------------------------------------- Pre-Format MODIS 250m water mask ------------------------------------------------
 for tile in getfilelist(mod44w_outdir, '.*[.]hdf$'):
     #Generate land-water mask
@@ -144,6 +137,8 @@ if not arcpy.Exists(mod44w_QAmosaic):
 if not Raster(mod44w_QAmosaic).hasRAT:
     arcpy.BuildRasterAttributeTable_management(mod44w_QAmosaic)
 
+
+""" Not used in the end
 # ----------------------------------------- Resample EarthEnv DEM 90 based on MODIS ------------------------------------
 ee_outdir = os.path.join(datdir, 'earthenv')
 ee_resgdb = os.path.join(resdir, 'earthenv.gdb')
@@ -347,3 +342,4 @@ for cont in hydrodir_list:
 #https://desktop.arcgis.com/en/arcmap/10.7/tools/spatial-analyst-toolbox/an-overview-of-the-generalization-tools.htm
 #Think of using Nibble to fill-in NoData regions
 #Look at Region Group.
+"""
