@@ -1,5 +1,5 @@
 """
-Download national river networks, model outputs, and on-the-ground observation of river intermittence
+Purpose: Download national river networks, model outputs, and on-the-ground observation of river intermittence
 """
 
 from setup_localIRformatting import *

@@ -7,7 +7,7 @@ Purpose:
 
 from utility_functions import *
 
-rootdir = 'D://PhD//HydroATLAS'
+rootdir = os.path.dirname(os.path.abspath(__file__)).split('\\src')[0]
 datdir = os.path.join(rootdir, 'data')
 resdir = os.path.join(rootdir, 'results')
 
