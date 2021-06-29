@@ -29,7 +29,6 @@ obsfinal_pnw_wgs = os.path.join(resdir_pnw, 'StreamflowPermObs_finalwgs')
 nhdpnw = os.path.join(resdir_pnw, 'NHDpnw')
 nhdvaapnw = os.path.join(resdir_pnw, 'NHDvaapnw')
 
-
 #Only keep points for which use is "No; Outside 2004-2016", "Yes" and observation was made after June:
 arcpy.MakeFeatureLayer_management(obsraw_pnw, out_layer='pnwlyr',
                                   where_clause='(Use IN {}) AND (Month > 6)'.format(str(("No; Outside 2004-2016", "Yes"))))
@@ -104,7 +103,7 @@ with arcpy.da.UpdateCursor(obsjoin_atlas, ['facnhd_km2', 'UPLAND_SKM', 'facratio
             row[2] = row[1]/float(row[0])
             cursor.updateRow(row)
 
-#Remove those that are over 500 m away and NHDplus upstream area < 10 km2 OR > 1000 m
+#Remove those that are over 500 m away and NHDplus upstream area < 10 km2
 arcpy.MakeFeatureLayer_management(obsjoin_atlas, 'atlasjoinlyr',
                                   where_clause='NOT ((((distatlas > 500) OR (facratio_line > 3)) AND (facnhd_km2 < 10)) '
                                                'OR (facnhd_km2 Is Null))')

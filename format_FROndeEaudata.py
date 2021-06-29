@@ -6,7 +6,6 @@ pathcheckcreate(datdir)
 resdir = os.path.join(insituresdir, 'OndeEau.gdb')
 pathcheckcreate(resdir)
 
-
 cartnet_raw =os.path.join(datdir,'TronconHydrograElt_FXX.shp')
 cartnet = os.path.join(resdir,'carthage_network')
 obsraw= os.path.join(resdir,'obsraw')

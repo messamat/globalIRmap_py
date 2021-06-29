@@ -56,6 +56,13 @@ pathcheckcreate(datdir_pnw)
 
 ####################### REGIONAL RIVER NETWORK DATASETS WITH INTERMITTENCE DATA ########################################
 #-------------------- USA ----------------------------------------------------------------------------------------------
+# Download HUC4 polygons
+if not os.path.exists('WBD_National_GDB.zip'):
+    dlfile(url='https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/WBD/National/GDB/WBD_National_GDB.zip',
+           outpath=datdir_us,
+           outfile='WBD_National_GDB.zip',
+           ignore_downloadable=True)
+
 #Make sure to only keep data for the conterminous US
 #Subselect HydroSHEDS river basins that overlap with the conterminous US
 arcpy.Project_management(inbas_us, out_dataset=os.path.join(resdir_us, 'WBDHU4_wgs84'),
@@ -101,13 +108,6 @@ with arcpy.da.UpdateCursor(bassel_us, ['HUC8', 'HYBAS_ID']) as cursor:
 #     if not arcpy.Exists(outgdb):
 #         print(url)
 #         dlfile(url=url, outpath=os.path.join(datdir_us, "NHDPlus_hr"), ignore_downloadable=True)
-
-#Download HUC4 polygons
-# if not os.path.exists('WBD_National_GDB.zip'):
-#     dlfile(url='https://prd-tnm.s3.amazonaws.com/StagedProducts/Hydrography/WBD/National/GDB/WBD_National_GDB.zip',
-#            outpath=datdir_us,
-#            outfile='WBD_National_GDB.zip',
-#            ignore_downloadable=True)
 
 #Merge all flow lines
 FLlist = [os.path.join(i, 'NHDFlowLine') for i in 
@@ -355,60 +355,9 @@ arcpy.AddGeometryAttributes_management(netbasinters_au, Geometry_Properties='LEN
                                        Length_Unit='Kilometers')
 arcpy.CopyRows_management(netbasinters_au, os.path.join(resdir, 'netbas12_inters_australia.csv'))
 
-
-#-------------------- France - BD Topage® ----------------------------------------------------------------------------------------------
-# bdtopage_url = http://services.sandre.eaufrance.fr/telechargement/geo/ETH/BDTopage/2019/BD_Topage_FXX_2019.zip
-# bdtopo_url = ftp://BDTOPO_V3_ext:Aish3ho8!!!@ftp3.ign.fr/BDTOPO_3-0_2020-09-15/BDTOPO_3-0_HYDROGRAPHIE_SHP_LAMB93_FXX_2020-09-15.7z
-# dlfile(url=url, outpath=os.path.join(datdir_us, "NHDPlus_hr"), ignore_downloadable=True)
-
-#http://www.sandre.eaufrance.fr/?urn=urn:sandre:donnees:773::::::referentiel:3.1:html
-#datdir_bdtopage = os.path.join(datdir_fr, 'bdtopage')
-#innet_bdtopage = os.path.join(datdir_bdtopage, 'TronconHydrographique_FXX.shp')
-#No network information. Would have to computer river orders
-
-
 #-----------------------------------------------------------------------------------------------------------------------
-#Argentina
+#Manually download Argentina dataset at
 "https://www.ign.gob.ar/NuestrasActividades/InformacionGeoespacial/CapasSIG"
-
-#Espana
-#https://centrodedescargas.cnig.es/CentroDescargas/buscadorCatalogo.do?codFamilia=HIDRO#
-
-#Canada
-"http://ftp.maps.canada.ca/pub/nrcan_rncan/vector/canvec/fgdb/Hydro/"
-"http://ftp.maps.canada.ca/pub/nrcan_rncan/vector/canvec/fgdb/Hydro/canvec_50K_AB_Hydro_fgdb.zip"
-"http://ftp.maps.canada.ca/pub/nrcan_rncan/vector/index/nts_snrc.zip" #Tile system
-
-#Mexico
-#https://www.inegi.org.mx/temas/hidrografia/default.html#Descargas - REFERENCE
-mexico_linklist = ["http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/" \
-                   "bvinegi/productos/geografia/hidrogeolo/region_hidrografica/70282500{}_s.zip".format(i) for i in xrange(6976, 7013)]
-for url in mexico_linklist:
-    print(url)
-    dlfile(url=url, outpath=os.path.join(compdatdir, 'Mexico'), ignore_downloadable=True)
-
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007012_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007011_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007010_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007009_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007008_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007007_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007006_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007005_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007004_s.zip"
-
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825006977_s.zip"
-"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825006976_s.zip"
-
-#France
-http://onde.eaufrance.fr/
-https://www.sciencebase.gov/catalog/item/5a0f338de4b09af898d099b9
-
-#Digital Chart of the World
-#https://guides.libraries.psu.edu/c.php?g=376207&p=5296088
-#https://psu.app.box.com/v/dcw
-
-#South Africa
 
 ####################### HIGH QUALITY IN SITU DATA ######################################################################
 # -------------------- FRANCE - ONDE EAU -------------------------------------------------------------------------------
@@ -453,6 +402,7 @@ if not os.path.exists(os.path.join(datdir_pnw, 'fac_taudem_17all_int.tif')):
                    outfile = ltext,
                    ignore_downloadable= True)
 
+""" NOT USED
 #######################################################################################################################
 # http://www.freshwaterplatform.eu/
 # http://project.freshwaterbiodiversity.eu/
@@ -460,3 +410,52 @@ if not os.path.exists(os.path.join(datdir_pnw, 'fac_taudem_17all_int.tif')):
 # http://irbas.inrae.fr/people/related-publications
 # http://www.ub.edu/fem/index.php/en/inici-riunet-en
 # https://onde.eaufrance.fr/content/t%C3%A9l%C3%A9charger-les-donn%C3%A9es-des-campagnes-par-ann%C3%A9e
+
+#Extra
+#-------------------- France - BD Topage® ----------------------------------------------------------------------------------------------
+# bdtopage_url = http://services.sandre.eaufrance.fr/telechargement/geo/ETH/BDTopage/2019/BD_Topage_FXX_2019.zip
+# bdtopo_url = ftp://BDTOPO_V3_ext:Aish3ho8!!!@ftp3.ign.fr/BDTOPO_3-0_2020-09-15/BDTOPO_3-0_HYDROGRAPHIE_SHP_LAMB93_FXX_2020-09-15.7z
+# dlfile(url=url, outpath=os.path.join(datdir_us, "NHDPlus_hr"), ignore_downloadable=True)
+
+#http://www.sandre.eaufrance.fr/?urn=urn:sandre:donnees:773::::::referentiel:3.1:html
+#datdir_bdtopage = os.path.join(datdir_fr, 'bdtopage')
+#innet_bdtopage = os.path.join(datdir_bdtopage, 'TronconHydrographique_FXX.shp')
+#No network information. Would have to computer river orders
+
+#Espana
+#https://centrodedescargas.cnig.es/CentroDescargas/buscadorCatalogo.do?codFamilia=HIDRO#
+
+#Canada
+"http://ftp.maps.canada.ca/pub/nrcan_rncan/vector/canvec/fgdb/Hydro/"
+"http://ftp.maps.canada.ca/pub/nrcan_rncan/vector/canvec/fgdb/Hydro/canvec_50K_AB_Hydro_fgdb.zip"
+"http://ftp.maps.canada.ca/pub/nrcan_rncan/vector/index/nts_snrc.zip" #Tile system
+
+#Mexico
+#https://www.inegi.org.mx/temas/hidrografia/default.html#Descargas - REFERENCE
+mexico_linklist = ["http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/" \
+                   "bvinegi/productos/geografia/hidrogeolo/region_hidrografica/70282500{}_s.zip".format(i) for i in xrange(6976, 7013)]
+for url in mexico_linklist:
+    print(url)
+    dlfile(url=url, outpath=os.path.join(compdatdir, 'Mexico'), ignore_downloadable=True)
+
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007012_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007011_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007010_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007009_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007008_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007007_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007006_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007005_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825007004_s.zip"
+
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825006977_s.zip"
+"http://internet.contenidos.inegi.org.mx/contenidos/Productos/prod_serv/contenidos/espanol/bvinegi/productos/geografia/hidrogeolo/region_hidrografica/702825006976_s.zip"
+
+#France
+http://onde.eaufrance.fr/
+https://www.sciencebase.gov/catalog/item/5a0f338de4b09af898d099b9
+
+#Digital Chart of the World
+#https://guides.libraries.psu.edu/c.php?g=376207&p=5296088
+#https://psu.app.box.com/v/dcw
+"""

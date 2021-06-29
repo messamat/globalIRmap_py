@@ -7,10 +7,6 @@ Purpose:
 
 from utility_functions import *
 
-rootdir = os.path.dirname(os.path.abspath(__file__)).split('\\src')[0]
-datdir = os.path.join(rootdir, 'data')
-resdir = os.path.join(rootdir, 'results')
-
 arcpy.env.overwriteOutput = True
 arcpy.env.qualifiedFieldNames = 'False'
 arcpy.CheckOutExtension('Spatial')

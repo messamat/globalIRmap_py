@@ -31,7 +31,7 @@ riveratlasv11_csv = os.path.join(resdir, 'RiverATLAS_v11tab.csv')
 riveratlas_b03 = os.path.join(outgdb, 'RiverATLASbas3join')
 riveratlas_b05 = os.path.join(outgdb, 'RiverATLASbas5join')
 
-# ---------- Flag reaches within lakes ------
+# ---------- Intersect river reaches with lakes ------
 rivlakeinters = os.path.join(outgdb, 'riveratlas_hydrolakes_inters')
 if not arcpy.Exists(rivlakeinters):
     arcpy.Intersect_analysis(in_features = [riveratlas, hydrolakes], out_feature_class=rivlakeinters,

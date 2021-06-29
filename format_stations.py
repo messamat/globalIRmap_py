@@ -18,6 +18,7 @@ arcpy.env.qualifiedFieldNames = 'False'
 #Input variables
 riveratlas = os.path.join(datdir, 'HydroATLAS', 'RiverATLAS_v10.gdb', 'RiverATLAS_v10')
 seamaskbuf3k = os.path.join(datdir, 'GLAD', 'class99_19_rsp9_buf3k1.tif')
+basinatlasl05 = os.path.join(datdir, 'HydroATLAS', 'BasinATLAS_v10.gdb', 'BasinATLAS_v10_lev05')
 
 #Output variables
 outgdb = os.path.join(resdir, 'spatialoutputs.gdb')
@@ -31,6 +32,7 @@ grdcp = os.path.join(outgdb, 'grdcstations')
 grdcpjoin = os.path.join(outgdb, 'grdcstations_riverjoin')
 grdcpclean = os.path.join(outgdb, 'grdcstations_clean')
 grdcpcleanjoin = os.path.join(outgdb, 'grdcstations_cleanjoin')
+basin5grdcpjoin = os.path.join(outgdb, 'BasinATLAS_v10_lev05_GRDCstations_join')
 
 #GSIM stations
 gsimdatdir = os.path.join(datdir, 'GSIM')
@@ -231,19 +233,19 @@ if not arcpy.Exists(gsimpsub2):
                 cursor.deleteRow()
 
 if not arcpy.Exists(gsimpsub2join):
-    print('Join gsim stations to HydroBASINS level 6')
+    print('Join gsim stations to HydroBASINS level 5')
     arcpy.SpatialJoin_analysis(target_features=gsimpsub2,
-                               join_features=basinatlasl06,
+                               join_features=basinatlasl05,
                                out_feature_class=gsimpsub2join,
                                join_operation='JOIN_ONE_TO_ONE',
                                join_type="KEEP_COMMON",
                                match_option='INTERSECT'
                                )
 
-#Remove all stations that are not intermittent or in basins level 06 (give average area) where we did not yet have any observations
+#Remove all stations that are not intermittent or in basins level 05 (give average area) where we did not yet have any observations
 # Check basins where we already have GRDC stations with a record that spans at least 10 years
 # Get number of years of data in GRDC
-if not arcpy.Exists(basin6grdcpjoin):
+if not arcpy.Exists(basin5grdcpjoin):
     grdcdistablist = getfilelist(dir=grdc_disdatdir)
     print('Compute number of years of data in GRDC for {} station...'.format(len(grdcdistablist)))
     grdc_u20missy = {}
@@ -263,16 +265,16 @@ if not arcpy.Exists(basin6grdcpjoin):
             if grdc_u20missy[row[0]] < 10:
                 cursor.deleteRow()
 
-    arcpy.SpatialJoin_analysis(target_features=basinatlasl06,
+    arcpy.SpatialJoin_analysis(target_features=basinatlasl05,
                                join_features=grdcp_10ymin,
-                               out_feature_class=basin6grdcpjoin,
+                               out_feature_class=basin5grdcpjoin,
                                join_operation='JOIN_ONE_TO_ONE',
                                join_type="KEEP_COMMON",
                                match_option='INTERSECT')
 
 if not arcpy.Exists(gsimpsub3):
     basgrdcpdict = {row[0] : [row[1], row[2]] for row in
-                 arcpy.da.SearchCursor(basin6grdcpjoin, ['HYBAS_ID', 'Join_Count', 'SUB_AREA'])} #Get basins where there are GRDC stations
+                 arcpy.da.SearchCursor(basin5grdcpjoin, ['HYBAS_ID', 'Join_Count', 'SUB_AREA'])} #Get basins where there are GRDC stations
     arcpy.CopyFeatures_management(gsimpsub2join, gsimpsub3)
     with arcpy.da.UpdateCursor(gsimpsub3, ['ir_moprop', 'HYBAS_ID']) as cursor:
         for row in cursor:
