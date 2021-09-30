@@ -93,6 +93,8 @@ if not arcpy.Exists(grdcpjoinedit):
     arcpy.AddField_management(grdcpjoinedit, 'manualsnap_mathis', 'SHORT')
     arcpy.AddField_management(grdcpjoinedit, 'snap_comment_mathis', 'TEXT')
 
+#Manual editing
+
 #Delete those that were marked with -1
 if not arcpy.Exists(grdcpclean):
     arcpy.CopyFeatures_management(grdcpjoinedit, grdcpclean)
