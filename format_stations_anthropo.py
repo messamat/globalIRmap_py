@@ -28,7 +28,10 @@ gsimresdir = os.path.join(resdir, 'GSIM')
 gsimresgdb = os.path.join(gsimresdir, 'GSIM.gdb')
 gsimpsub3= os.path.join(gsimresgdb, 'GSIMSstations_sub3')
 gsimpsnapedit = os.path.join(gsimresgdb, 'GSIMSstations_riversnapedit')
+gsimpsnapeditb = os.path.join(gsimresgdb, 'GSIMSstations_riversnapeditb')
 gsimpsnapedit_anthropo = os.path.join(gsimresgdb, 'GSIMSstations_riversnapedit_anthropo')
+gsimpsnapeditb_anthropo = os.path.join(gsimresgdb, 'GSIMSstations_riversnapeditb_anthropo')
+gsimpsnapedit_anthropo_merge = os.path.join(gsimresgdb, 'GSIMSstations_riversnapedit_anthropo_merge')
 gsimpsnapclean_anthropo = os.path.join(gsimresgdb, 'GSIMstations_riversnapclean_anthropo')
 gsimpcleanjoin_anthropo = os.path.join(gsimresgdb, 'GSIMstations_cleanriverjoin_anthropo')
 
@@ -66,11 +69,16 @@ arcpy.AddGeometryAttributes_management(grdcpcleanjoin_anthropo, Geometry_Propert
 if not arcpy.Exists(gsimpsnapedit_anthropo):
     arcpy.CopyFeatures_management(gsimpsnapedit, gsimpsnapedit_anthropo)
 
+if not arcpy.Exists(gsimpsnapeditb_anthropo):
+    arcpy.CopyFeatures_management(gsimpsnapeditb, gsimpsnapeditb_anthropo)
+
 ############ Manual edits to re-introduce those  that were included because downstream of reservoirs or diversions
+
+arcpy.Merge_management([gsimpsnapedit_anthropo, gsimpsnapeditb_anthropo], gsimpsnapedit_anthropo_merge)
 
 #Delete those that were marked with -1
 if not arcpy.Exists(gsimpsnapclean_anthropo):
-    arcpy.CopyFeatures_management(gsimpsnapedit_anthropo, gsimpsnapclean_anthropo)
+    arcpy.CopyFeatures_management(gsimpsnapedit_anthropo_merge, gsimpsnapclean_anthropo)
     with arcpy.da.UpdateCursor(gsimpsnapclean_anthropo, ['manualsnap_mathis']) as cursor:
         for row in cursor:
             if row[0] == -1:

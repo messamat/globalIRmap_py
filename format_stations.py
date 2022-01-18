@@ -52,11 +52,17 @@ gsimpsub2 = os.path.join(gsimresgdb, 'GSIMSstations_sub2')
 gsimpsub2join = os.path.join(gsimresgdb, 'GSIMSstations_sub2_basinjoin')
 gsimpsub3= os.path.join(gsimresgdb, 'GSIMSstations_sub3')
 gsimpsub3join = os.path.join(gsimresgdb, 'GSIMSstations_sub3_riverjoin')
+gsimpsub3b= os.path.join(gsimresgdb, 'GSIMSstations_sub3b')
+gsimpsub3joinb = os.path.join(gsimresgdb, 'GSIMSstations_sub3_riverjoinb')
 
 grdcp_10ymin = os.path.join(gsimresgdb, 'grdcstations_10ymin')
 grdcpjoinedit = os.path.join(outgdb, 'grdcstations_riverjoinedit')
 gsimpsnap = os.path.join(gsimresgdb, 'GSIMSstations_riversnap')
 gsimpsnapedit = os.path.join(gsimresgdb, 'GSIMSstations_riversnapedit')
+gsimpsnapb= os.path.join(gsimresgdb, 'GSIMSstations_riversnapb')
+gsimpsnapeditb = os.path.join(gsimresgdb, 'GSIMSstations_riversnapeditb')
+
+gsimpsnapedit_merge = os.path.join(gsimresgdb, 'GSIMstations_riversnapedit_merge')
 gsimpsnapclean = os.path.join(gsimresgdb, 'GSIMstations_riversnapclean')
 gsimpcleanjoin = os.path.join(gsimresgdb, 'GSIMstations_cleanriverjoin')
 
@@ -274,19 +280,27 @@ if not arcpy.Exists(basin5grdcpjoin):
                                join_type="KEEP_COMMON",
                                match_option='INTERSECT')
 
+basgrdcpdict = {row[0] : [row[1], row[2]] for row in
+                arcpy.da.SearchCursor(basin5grdcpjoin, ['HYBAS_ID', 'Join_Count', 'SUB_AREA'])} #Get basins where there are GRDC stations
 if not arcpy.Exists(gsimpsub3):
-    basgrdcpdict = {row[0] : [row[1], row[2]] for row in
-                 arcpy.da.SearchCursor(basin5grdcpjoin, ['HYBAS_ID', 'Join_Count', 'SUB_AREA'])} #Get basins where there are GRDC stations
     arcpy.CopyFeatures_management(gsimpsub2join, gsimpsub3)
     with arcpy.da.UpdateCursor(gsimpsub3, ['ir_moprop', 'HYBAS_ID']) as cursor:
         for row in cursor:
             if (row[0] < 1/12.0) and (row[1] in basgrdcpdict.keys()):
                 cursor.deleteRow()
 
-    #Remove extraneous fields
-    for f1 in arcpy.ListFields(gsimpsub3):
-        if f1.name not in [f2.name for f2 in arcpy.ListFields(gsimpsub)]+['ir_moprop']:
-            arcpy.DeleteField_management(gsimpsub3, f1.name)
+if not arcpy.Exists(gsimpsub3b):
+    arcpy.CopyFeatures_management(gsimpsub2join, gsimpsub3b)
+    with arcpy.da.UpdateCursor(gsimpsub3b, ['ir_moprop', 'HYBAS_ID', 'area_correct']) as cursor:
+        for row in cursor:
+            if ((row[0] >= 1/12.0) or (row[1] not in basgrdcpdict.keys())) or (row[2] >= 100):
+                cursor.deleteRow()
+
+#Remove extraneous fields
+for f1 in arcpy.ListFields(gsimpsub3):
+    if f1.name not in [f2.name for f2 in arcpy.ListFields(gsimpsub)]+['ir_moprop']:
+        arcpy.DeleteField_management(gsimpsub3, f1.name)
+        arcpy.DeleteField_management(gsimpsub3b, f1.name)
 
 if not arcpy.Exists(gsimpsub3join):
     print('Join gsim stations to nearest river reach in RiverAtlas')
@@ -300,10 +314,26 @@ if not arcpy.Exists(gsimpsub3join):
                                     expression='(!area_correct!-!UPLAND_SKM!)/!UPLAND_SKM!',
                                     expression_type='PYTHON')
 
+if not arcpy.Exists(gsimpsub3joinb):
+    print('Join gsim stations to nearest river reach in RiverAtlas')
+    arcpy.SpatialJoin_analysis(gsimpsub3b,
+                               riveratlas, gsimpsub3joinb, join_operation='JOIN_ONE_TO_ONE', join_type="KEEP_COMMON",
+                               match_option='CLOSEST_GEODESIC', search_radius=0.1,
+                               distance_field_name='station_river_distance')
+
+    arcpy.AddField_management(gsimpsub3joinb, field_name='DApercdiff', field_type='FLOAT')
+    arcpy.CalculateField_management(gsimpsub3joinb, field='DApercdiff',
+                                    expression='(!area_correct!-!UPLAND_SKM!)/!UPLAND_SKM!',
+                                    expression_type='PYTHON')
+
 #Snap to river network when within 200 m
 arcpy.CopyFeatures_management(gsimpsub3join, gsimpsnap)
 snapenv = [[riveratlas, 'EDGE', '200 meters']]
 arcpy.Snap_edit(gsimpsnap, snapenv)
+
+arcpy.CopyFeatures_management(gsimpsub3joinb, gsimpsnapb)
+snapenv = [[riveratlas, 'EDGE', '200 meters']]
+arcpy.Snap_edit(gsimpsnapb, snapenv)
 
 #Flag those to check and edit them: beyond 200 m from HydroSHEDS reach OR DApercdiff > 5%
 arcpy.CopyFeatures_management(gsimpsnap, gsimpsnapedit)
@@ -317,11 +347,26 @@ with arcpy.da.UpdateCursor(gsimpsnapedit, ['DApercdiff', 'station_river_distance
             row[2] = 2
             cursor.updateRow(row)
 
+arcpy.CopyFeatures_management(gsimpsnapb, gsimpsnapeditb)
+
+arcpy.AddField_management(gsimpsnapeditb, 'manualsnap_mathis', 'SHORT')
+arcpy.AddField_management(gsimpsnapeditb, 'snap_commentmathis', 'TEXT')
+
+with arcpy.da.UpdateCursor(gsimpsnapeditb, ['DApercdiff', 'station_river_distance', 'manualsnap_mathis']) as cursor:
+    for row in cursor:
+        if (abs(row[0]) > 0.05) or (row[1] > 200):
+            row[2] = 2
+            cursor.updateRow(row)
+
 #Process to snapping, manual editing and deleting
+
+#Merge the two edited layers
+arcpy.Merge_management([gsimpsnapedit, gsimpsnapeditb], gsimpsnapedit_merge)
+
 
 #Delete those that were marked with -1
 if not arcpy.Exists(gsimpsnapclean):
-    arcpy.CopyFeatures_management(gsimpsnapedit, gsimpsnapclean)
+    arcpy.CopyFeatures_management(gsimpsnapedit_merge, gsimpsnapclean)
     with arcpy.da.UpdateCursor(gsimpsnapclean, ['manualsnap_mathis']) as cursor:
         for row in cursor:
             if row[0] == -1:
